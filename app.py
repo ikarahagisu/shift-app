@@ -568,4 +568,4 @@ if uploaded_file is not None:
                 except Exception as e:
                     st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
 else:
-    st.warning("☝️ まずはCSVファイルをアップロードしてください。")]
+    st.warning("☝️ まずはCSVファイルをアップロードしてください。")
