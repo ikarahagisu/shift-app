@@ -24,8 +24,9 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
-    * **【希望優先度】** 基本は `1` です。
-        * ここを `100` 以上にすると「絶対希望」となり、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。
+    * **【希望優先度】** 希望を通すための「相対的な強さ」です。基本は `1` です。
+        * 例：Dr. Aを `10`、Dr. Bを `1` にして同じ日を希望して競合した場合、AIはDr. Aの希望を優先的に叶えます（※ただし間隔などのルール範囲内）。
+        * **特例（絶対希望）**：ここを `100` 以上にすると、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。
     * **【最低空ける日数】** シフトとシフトの間を最低何日空けるかです。（人ごとに設定できます）
     * **【月間最大回数】** その月に入るすべてのシフトの「総合計」の上限回数です。（人ごとに設定できます）
     * **【各種上限】** 「宿直A」「日直B」など枠ごとの上限回数です。
@@ -43,6 +44,8 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「2. 過去・決定済みシフトの読み込み（任意）」に、このアプリで出力したシフト表をそのままアップロードできます。
     * **先月のシフトを入れた場合**: 前月末の勤務を考慮し、月初の間隔ルールをしっかり守ります。
     * **今月の途中まで作ったシフトを入れた場合**: その部分は「確定」として固定し、残りの「 - 」（ハイフン）の空き枠だけをAIが綺麗に埋めてくれます！
+    * 💡 **「絶対希望」との違いについて**:
+      CSVの優先度を100以上にする「絶対希望」と、ここで確定済みのシフトを読み込ませる機能は、**「指定した枠を確実に固定する」という点で全く同じ効果**を持ちます。最初から絶対に動かしたくない枠はCSVで「優先度100」にし、一度AIに作らせてから「数カ所だけ手直しして残りを再計算させたい」場合はこちらの読み込み機能を使うなど、用途に合わせて使い分けてください。
     """)
 
 # ==========================================
@@ -169,7 +172,6 @@ st.divider()
 # ==========================================
 # 4. シフト計算ロジック（関数）
 # ==========================================
-# === ▼変更：計算関数から、実績計算用に「過去・未来の勤務日データ」も一緒に返すように修正▼ ===
 def generate_shift(target_year, target_month, staff_df, custom_holidays, fixed_df=None):
     _, num_days = calendar.monthrange(target_year, target_month)
     NIGHT_SHIFTS = ['宿直A', '宿直B', '外来宿直']
@@ -552,7 +554,6 @@ if uploaded_file is not None:
         if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
             with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
                 try:
-                    # === ▼変更：AIから「過去・未来の勤務日」のデータも受け取る▼ ===
                     df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, fixed_df)
                     
                     if success:
@@ -602,23 +603,18 @@ if uploaded_file is not None:
                                             except:
                                                 pass
                         
-                        # === ▼変更：集計表を作るときに「過去・未来」の日付も混ぜて間隔を計算する▼ ===
                         for doc in doctors_list:
                             doc_data = {"先生の名前": doc}
                             total_count = 0
                             hol_count = 0
                             
-                            # その先生の「全て」の勤務日を保存する箱（重複しないようにsetを使う）
                             doc_working_dates = set()
                             
-                            # ① もし過去のシフトがあれば箱に入れる
                             if past_worked_dates and doc in past_worked_dates:
                                 doc_working_dates.update(past_worked_dates[doc])
-                            # ② もし未来のシフトがあれば箱に入れる
                             if future_worked_dates and doc in future_worked_dates:
                                 doc_working_dates.update(future_worked_dates[doc])
                             
-                            # ③ 今回AIが作った今月のシフトを箱に入れる
                             for d_idx in range(len(df_result)):
                                 row = df_result.iloc[d_idx]
                                 is_working = False
@@ -627,10 +623,8 @@ if uploaded_file is not None:
                                         is_working = True
                                         break
                                 if is_working:
-                                    # 今月の日付（カレンダー通り）として保存
                                     doc_working_dates.add(datetime.date(year, month, d_idx + 1))
                             
-                            # （回数のカウントは「今月分」だけで計算する）
                             for s in shift_columns:
                                 count = (df_result[s] == doc).sum()
                                 doc_data[s] = count
@@ -640,10 +634,8 @@ if uploaded_file is not None:
                             doc_data["土日祝の回数"] = hol_count
                             doc_data["総合計"] = total_count
                             
-                            # ④ 全ての日付を日付順に並べ替えて、間隔を引き算する
                             sorted_dates = sorted(list(doc_working_dates))
                             if len(sorted_dates) >= 2:
-                                # 日付同士を引き算して「間隔（日数）」を計算（例: 5日と10日なら、10-5-1 = 4日空き）
                                 intervals = [(sorted_dates[i] - sorted_dates[i-1]).days - 1 for i in range(1, len(sorted_dates))]
                                 doc_data["最小間隔"] = min(intervals)
                                 doc_data["平均間隔"] = sum(intervals) / len(intervals)
@@ -653,7 +645,6 @@ if uploaded_file is not None:
                                 
                             total_reqs = len(req_days_eval[doc]) + len(req_spec_eval[doc])
                             if total_reqs > 0:
-                                # 今月分の日付リストを作り直して希望が叶ったか判定（ここは今まで通り）
                                 current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
                                 granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
                                 for req_d, req_s in req_spec_eval[doc]:
