@@ -17,6 +17,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     ### 1. 準備する（スタッフ条件データの作成）
     まずは画面中央の「📥 ひな形（CSV）をダウンロード」ボタンを押して、専用のファイルを入手します。
     Excelなどで開き、先生ごとの条件を入力して上書き保存（CSV形式）してください。
+    ※ひな形の2行目にある「【※入力ルール】」の行は、消さずにそのまま残しておいて大丈夫です。
     
     **【各項目の入力ルール】**
     * **【NG日】** 入れない日を半角数字で入力します。（例: `5,12,20`）
@@ -28,6 +29,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     * **【最低空ける日数】** シフトとシフトの間を最低何日空けるかです。（人ごとに設定できます）
     * **【月間最大回数】** その月に入るすべてのシフトの「総合計」の上限回数です。（人ごとに設定できます）
     * **【各種上限】** 「宿直A」「日直B」など枠ごとの上限回数です。
+    * **【備考】** メモや説明などを自由に書き込める欄です。（AIの計算には影響しません）
 
     ### 2. アプリで設定する
     画面上部で、作成したい「年」と「月」を選びます（自動的に来月がセットされています）。
@@ -118,20 +120,23 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み")
 
+# === ▼変更：2行目に人間が見るための「ルールの説明」を追加▼ ===
 template_data = {
-    "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
-    "NG日(半角カンマ区切り)": ["5,12,20", "10", "", "3,4,5", "25,26"],
-    "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
-    "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
-    "最低空ける日数": [5, 4, 6, 5, 3],  
-    "月間最大回数": [5, 6, 4, 5, 7],    
-    "宿直A上限": [2, 2, 2, 2, 2],
-    "宿直B上限": [2, 2, 2, 2, 2],
-    "外来宿直上限": [2, 2, 2, 2, 2],
-    "日直A上限": [2, 2, 2, 2, 2],
-    "日直B上限": [2, 2, 2, 2, 2],
-    "外来日直上限": [2, 2, 2, 2, 2]
+    "先生の名前": ["【※入力ルール（この行は消さずに残してOK）】", "Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
+    "NG日(半角カンマ区切り)": ["入れない日。複数なら半角カンマ区切り（例: 5,12）", "5,12,20", "10", "", "3,4,5", "25,26"],
+    "希望日(半角カンマ区切り)": ["入りたい日。種類指定も可（例: 10:宿直A, 15）", "10:宿直A, 15:日直B", "", "8", "20", ""], 
+    "希望優先度(数字が大きいほど優先)": ["基本は1。100以上にすると絶対希望になります", 100, 1, 1, 1, 1], 
+    "最低空ける日数": ["間隔を最低何日空けるか（数字）", 5, 4, 6, 5, 3],  
+    "月間最大回数": ["月の総シフト数の上限（数字）", 5, 6, 4, 5, 7],    
+    "宿直A上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "宿直B上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "外来宿直上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "日直A上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "日直B上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "外来日直上限": ["この枠の上限回数（数字）", 2, 2, 2, 2, 2],
+    "備考（メモ・説明など自由記入）": ["AIは読み込まないのでメモにどうぞ", "学会のためNG多め", "15日は午後休", "", "当直明け休み希望", ""]
 }
+# ==============================================================
 
 df_template = pd.DataFrame(template_data)
 csv_template = df_template.to_csv(index=False).encode('shift_jis')
@@ -158,6 +163,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays):
     def is_holiday(y, m, d):
         date = datetime.date(y, m, d)
         return date.weekday() >= 5 or jpholiday.is_holiday(date) or (d in custom_holidays)
+    
+    # 数字を安全に読み込むための便利機能（文字が混ざっていてもエラーで止めない）
+    def safe_int(val, default_val):
+        if pd.isna(val): return default_val
+        try:
+            return int(float(val))
+        except:
+            return default_val
 
     doctors = staff_df['先生の名前'].astype(str).tolist()
     ng_days = {}
@@ -206,31 +219,18 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays):
                         except:
                             pass
 
-        if '希望優先度(数字が大きいほど優先)' in staff_df.columns and not pd.isna(row['希望優先度(数字が大きいほど優先)']):
-            try:
-                req_priority[doc] = int(row['希望優先度(数字が大きいほど優先)'])
-            except:
-                req_priority[doc] = 1
-        else:
-            req_priority[doc] = 1
-
-        if '最低空ける日数' in staff_df.columns and not pd.isna(row['最低空ける日数']):
-            min_intervals[doc] = int(row['最低空ける日数'])
-        else:
-            min_intervals[doc] = 5
-            
-        if '月間最大回数' in staff_df.columns and not pd.isna(row['月間最大回数']):
-            max_shifts_total[doc] = int(row['月間最大回数'])
-        else:
-            max_shifts_total[doc] = 5
+        # === 安全な数字の読み込みに変更 ===
+        req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
+        min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
+        max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
 
         max_shifts_per_type[doc] = {
-            '宿直A': int(row['宿直A上限']),
-            '宿直B': int(row['宿直B上限']),
-            '外来宿直': int(row['外来宿直上限']),
-            '日直A': int(row['日直A上限']),
-            '日直B': int(row['日直B上限']),
-            '外来日直': int(row['外来日直上限'])
+            '宿直A': safe_int(row.get('宿直A上限'), 2),
+            '宿直B': safe_int(row.get('宿直B上限'), 2),
+            '外来宿直': safe_int(row.get('外来宿直上限'), 2),
+            '日直A': safe_int(row.get('日直A上限'), 2),
+            '日直B': safe_int(row.get('日直B上限'), 2),
+            '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
 
     absolute_req_days = {doc: [] for doc in doctors}
@@ -430,11 +430,20 @@ if uploaded_file is not None:
         st.error(f"ファイルの読み込みに失敗しました。詳細: {e}")
 
     if staff_df is not None:
+        # === ▼追加：AI計算や画面表示の前に、ルールの説明行をサッと非表示にする処理▼ ===
+        staff_df = staff_df.dropna(subset=['先生の名前'])
+        # 「【※入力ルール」から始まる行を除外
+        staff_df = staff_df[~staff_df['先生の名前'].astype(str).str.startswith('【※入力ルール')].reset_index(drop=True)
+        # ============================================================================
+
         with st.expander("📝 読み込んだスタッフデータを確認", expanded=True):
-            staff_height = len(staff_df) * 35 + 40
-            st.dataframe(staff_df, use_container_width=True, hide_index=True, height=staff_height)
+            if len(staff_df) > 0:
+                staff_height = len(staff_df) * 35 + 40
+                st.dataframe(staff_df, use_container_width=True, hide_index=True, height=staff_height)
+            else:
+                st.warning("データが空です。先生の名前や条件を入力してください。")
             
-        if st.button("🚀 このデータでシフトを自動生成する", type="primary"):
+        if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
             with st.spinner("AIが最適なシフトを計算中...（絶対希望日と種類を確定させています。最大45秒かかります）"):
                 try:
                     df_result, success, error_reasons = generate_shift(year, month, staff_df, custom_holidays)
