@@ -24,44 +24,52 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * **種類まで指定（例: `10:宿直A, 15:日直B`）** → その日の「その枠」を狙います。（※コロン `:` は半角でも全角でもOKです）
     * **希望優先度**: 基本は `1` です。
-        * **ここを `100` 以上にすると「絶対希望（ゴッドモード）」となり、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。**
+        * **ここを `100` 以上にすると「絶対希望」となり、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。**
     * **最低空ける日数**: シフトとシフトの間を最低何日空けるかです。（人ごとに設定できます）
     * **月間最大回数**: その月に入るすべてのシフトの「総合計」の上限回数です。（人ごとに設定できます）
     * **各種上限**: 「宿直A」「日直B」など枠ごとの上限回数です。
 
     ### 2. アプリで設定する
-    左側のサイドバーで、作成したい「年」と「月」を選びます。
-    特別休日（創立記念日や年末年始など、平日だけど日直枠を作りたい日）があれば入力してください。
+    画面上部で、作成したい「年」と「月」を選びます（自動的に来月がセットされています）。
+    年末年始やお盆など、カレンダー上は平日でも日直が必要な（休日扱いにする）日がある場合は、その下の「特別休日の設定」に日付を半角数字で入力してください。
 
     ### 3. シフトを自動生成する
-    作成したCSVファイルをアップロードし、「🚀 自動生成」ボタンを押します。
+    条件を入力して保存したCSVファイルを、画面のアップロード枠にドラッグ＆ドロップし、「🚀 自動生成」ボタンを押します。
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。いくつか試して一番良いものを選んでください。
     """)
 
 # ==========================================
-# 1. サイドバー：対象年月の設定と特別休日
+# 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
-st.sidebar.header("基本設定")
-year = st.sidebar.number_input("年", min_value=2026, value=2026, step=1)
-month = st.sidebar.number_input("月", min_value=1, max_value=12, value=4, step=1)
+st.header("📅 作成するシフトの設定")
 
-st.sidebar.divider()
+today = datetime.date.today()
+if today.month == 12:
+    default_year = today.year + 1
+    default_month = 1
+else:
+    default_year = today.year
+    default_month = today.month + 1
 
-# === ▼修正：古い「シフトのルール設定」の画面項目を削除しました▼ ===
+col_y, col_m = st.columns(2)
+year = col_y.number_input("年", min_value=2026, value=default_year, step=1)
+month = col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
 
-st.sidebar.header("特別休日の設定")
-st.sidebar.write("※カレンダー上は平日でも、休日（日直枠あり）として扱いたい日を入力してください。")
-custom_holidays_str = st.sidebar.text_input("祝日扱いにする日（半角カンマ区切り。例: 29,30,31）", "")
+st.markdown("##### 特別休日の設定")
+st.write("※カレンダー上は平日でも、休日（日直枠あり）として扱いたい日を入力してください。")
+custom_holidays_str = st.text_input("祝日扱いにする日（半角カンマ区切り。例: 29,30,31）", "")
 
 custom_holidays = []
 if custom_holidays_str:
     try:
         custom_holidays = [int(x.strip()) for x in custom_holidays_str.split(',') if x.strip().isdigit()]
     except:
-        st.sidebar.error("数字と半角カンマで入力してください。")
+        st.error("数字と半角カンマで入力してください。")
+
+st.divider()
 
 # ==========================================
-# 2. 上部ダッシュボード：枠数とカレンダー表示
+# 2. 枠数とカレンダー表示
 # ==========================================
 _, num_days = calendar.monthrange(year, month)
 
@@ -79,7 +87,7 @@ col1.metric("🌙 宿直枠 (A・B・外来)", f"各 {num_days} 枠")
 col2.metric("☀️ 日直枠 (A・B・外来)", f"各 {holidays_count} 枠")
 col3.metric("🏥 月間 総シフト数", f"合計 {total_slots} 枠")
 
-st.subheader(f"📅 {month}月")
+st.subheader(f"📅 カレンダー確認（{month}月）")
 
 cal_matrix = calendar.monthcalendar(year, month)
 df_cal = pd.DataFrame(cal_matrix, columns=["月", "火", "水", "木", "金", "土", "日"])
