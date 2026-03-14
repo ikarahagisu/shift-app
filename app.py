@@ -119,7 +119,6 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み")
 
-# === ▼変更：ルール行を削除し、スッキリしたひな形に戻しました▼ ===
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "NG日(半角カンマ区切り)": ["5,12,20", "10", "", "3,4,5", "25,26"],
@@ -135,7 +134,6 @@ template_data = {
     "外来日直上限": [2, 2, 2, 2, 2],
     "備考（メモ・説明など自由記入）": ["学会のためNG多め", "15日は午後休", "", "当直明け休み希望", ""]
 }
-# ==============================================================
 
 df_template = pd.DataFrame(template_data)
 csv_template = df_template.to_csv(index=False).encode('shift_jis')
@@ -163,7 +161,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays):
         date = datetime.date(y, m, d)
         return date.weekday() >= 5 or jpholiday.is_holiday(date) or (d in custom_holidays)
     
-    # 数字を安全に読み込むための便利機能（文字が混ざっていてもエラーで止めない）
     def safe_int(val, default_val):
         if pd.isna(val): return default_val
         try:
@@ -230,6 +227,47 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays):
             '日直B': safe_int(row.get('日直B上限'), 2),
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
+
+    # === ▼追加：AIが無視してしまう入力ミスを計算前に検知してストップする機能▼ ===
+    invalid_requests = []
+    
+    for doc in doctors:
+        # 1. 存在しない日付のチェック
+        for d in req_days[doc]:
+            if not (1 <= d <= num_days):
+                invalid_requests.append(f"❌ **{doc}先生**: {target_month}月にはない日付（{d}日）が希望日に指定されています。")
+                
+        for d, s_name in req_specific[doc]:
+            if not (1 <= d <= num_days):
+                invalid_requests.append(f"❌ **{doc}先生**: {target_month}月にはない日付（{d}日）が希望日に指定されています。")
+            else:
+                # 2. 存在しないシフト枠のチェック（平日に日直、タイポなど）
+                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                if s_name not in active_shifts:
+                    day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
+                    invalid_requests.append(f"❌ **{doc}先生**: {target_month}月{d}日（{day_type}）には「{s_name}」というシフト枠はありません。（平日に日直を指定しているか、文字が間違っている可能性があります）")
+
+    # 3. 優先度100以上の希望が物理的に不可能じゃないかチェック
+    for d in range(1, num_days + 1):
+        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+        
+        # 1つの枠に複数人が「絶対希望」を出していないか
+        for s_name in active_shifts:
+            req_docs = [doc for doc in doctors if req_priority[doc] >= 100 and (d, s_name) in req_specific[doc]]
+            if len(req_docs) > 1:
+                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠に、優先度100以上で複数の先生（{', '.join(req_docs)}）が被って指定しているため、1人しか入れません。")
+                
+        # その日の枠数以上に「絶対希望」を出す人がいないか
+        abs_req_docs = [doc for doc in doctors if req_priority[doc] >= 100 and (d in req_days[doc] or any(sd == d for (sd, ss) in req_specific[doc]))]
+        abs_req_docs = list(set(abs_req_docs)) # 重複排除
+        if len(abs_req_docs) > len(active_shifts):
+            invalid_requests.append(f"❌ **{target_month}月{d}日**: 枠数({len(active_shifts)}枠)に対して、「優先度100以上」の絶対希望が{len(abs_req_docs)}名（{', '.join(abs_req_docs)}）もいるため、全員を入れられません。")
+
+    # もし1つでもミスがあれば、計算を始めずにここでエラーにして返す！
+    if invalid_requests:
+        unique_invalid = list(dict.fromkeys(invalid_requests))
+        return None, False, unique_invalid
+    # ==============================================================================
 
     absolute_req_days = {doc: [] for doc in doctors}
     absolute_req_specific = {doc: [] for doc in doctors}
@@ -377,13 +415,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays):
         
         for d in range(1, num_days + 1):
             active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            for s_name in active_shifts:
-                req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
-                if len(req_docs) > 1:
-                    reasons.append(f"❌ **{target_month}/{d}**: 「{s_name}」枠に、優先度100以上で複数の先生（{', '.join(req_docs)}）が確定指定しているため、パズルが破綻しています。")
-
-        for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
             req_slots = len(active_shifts)
             available = sum(1 for doc in doctors if d not in ng_days[doc])
             
@@ -428,7 +459,6 @@ if uploaded_file is not None:
         st.error(f"ファイルの読み込みに失敗しました。詳細: {e}")
 
     if staff_df is not None:
-        # 空の行（先生の名前がない行）を除外
         staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
         with st.expander("📝 読み込んだスタッフデータを確認", expanded=True):
@@ -444,7 +474,7 @@ if uploaded_file is not None:
                     df_result, success, error_reasons = generate_shift(year, month, staff_df, custom_holidays)
                     
                     if success:
-                        st.success("シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望は全て確約されています。")
+                        st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望は全て確約されています。")
                         
                         def highlight_holidays(row):
                             styles = [''] * len(row)
@@ -560,8 +590,8 @@ if uploaded_file is not None:
                             mime="text/csv",
                         )
                     else:
-                        st.error("条件が厳しすぎてシフトが組めませんでした。")
-                        st.warning("💡 **以下の原因が考えられます。Excelの条件（特定の先生の「最低空ける日数」や「最大回数」）を修正してください。**")
+                        st.error("入力された条件に誤りがあるか、条件が厳しすぎてシフトが組めませんでした。")
+                        st.warning("💡 **以下の原因が考えられます。Excelの入力を修正してください。**")
                         for reason in error_reasons:
                             st.write(reason)
                             
