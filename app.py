@@ -203,6 +203,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, fixed_d
     past_worked_dates = {doc: [] for doc in doctors}
     future_worked_dates = {doc: [] for doc in doctors}
 
+    # === ▼変更：エラーを記録するリストを一番上に移動▼ ===
+    invalid_requests = []
+
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
             date_str = str(row.get('日付', ''))
@@ -234,7 +237,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, fixed_d
                         doc_val = str(row[s_type]).strip()
                         if doc_val in doctors:
                             if m == target_month:
-                                absolute_req_specific[doc_val].append((d, s_type))
+                                # === ▼追加：決定済みCSVのあり得ない入力（平日の日直など）を検知する▼ ===
+                                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                                if s_type not in active_shifts:
+                                    day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
+                                    invalid_requests.append(f"❌ **「決定済みシフト(CSV)」の入力エラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
+                                else:
+                                    absolute_req_specific[doc_val].append((d, s_type))
+                                # ====================================================================
                             elif date_obj < datetime.date(target_year, target_month, 1):
                                 past_worked_dates[doc_val].append(date_obj)
                             else:
@@ -289,8 +299,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, fixed_d
             '日直B': safe_int(row.get('日直B上限'), 2),
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
-
-    invalid_requests = []
     
     for doc in doctors:
         for d in req_days[doc]:
