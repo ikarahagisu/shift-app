@@ -157,7 +157,6 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"ファイルの読み込みに失敗しました。詳細: {e}")
 
-# === ▼変更：表を直接編集できるUI（データエディタ）に変更▼ ===
 staff_df = st.data_editor(staff_df_init, num_rows="dynamic", use_container_width=True, key="staff_editor", height=300)
 
 csv_template = df_template.to_csv(index=False).encode('shift_jis')
@@ -176,13 +175,36 @@ st.divider()
 st.header("2. 過去・決定済みシフトの入力・読み込み（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があれば、以下の表に直接入力するかCSVをアップロードしてください。
-（※日付は「4/1」のように半角数字とスラッシュで入力してください）
+（※日付は「4/1」や「4/1(水)」のように半角数字とスラッシュを含めて入力してください）
 """)
 
-fixed_cols = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
-fixed_df_init = pd.DataFrame(columns=fixed_cols)
+# === ▼追加：決定済みシフト用のひな形データ作成とダウンロードボタン▼ ===
+fixed_template_data = {
+    "日付": ["3/31(火)", "4/1(水)", "4/5(日)"],
+    "区分": ["平日", "平日", "休日"],
+    "宿直A": ["Dr. A", "", ""],
+    "宿直B": ["", "Dr. B", ""],
+    "外来宿直": ["", "", ""],
+    "日直A": ["", "", "Dr. C"],
+    "日直B": ["", "", "Dr. D"],
+    "外来日直": ["", "", ""]
+}
+df_fixed_template = pd.DataFrame(fixed_template_data)
+csv_fixed_template = df_fixed_template.to_csv(index=False).encode('shift_jis')
+
+st.download_button(
+    label="📥 過去・決定済みシフトのひな形（CSV）をダウンロード",
+    data=csv_fixed_template,
+    file_name="fixed_shift_template.csv",
+    mime="text/csv",
+)
+# ==================================================================
 
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード（任意）", type="csv", key="fixed_csv")
+
+# 初期表示用の空のデータフレーム（邪魔にならないよう最初は空にしておきます）
+fixed_cols = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+fixed_df_init = pd.DataFrame(columns=fixed_cols)
 
 if fixed_file is not None:
     try:
@@ -194,7 +216,6 @@ if fixed_file is not None:
     except Exception as e:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
 
-# === ▼変更：表を直接編集できるUI（データエディタ）に変更▼ ===
 fixed_df = st.data_editor(fixed_df_init, num_rows="dynamic", use_container_width=True, key="fixed_editor", height=200)
 
 st.divider()
@@ -554,7 +575,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, fixed_d
 # ==========================================
 st.header("3. シフトの自動生成")
 
-# 実行前に、画面の入力データを整理（空の行を弾く）
 staff_df_clean = staff_df.dropna(subset=['先生の名前']).copy()
 staff_df_clean['先生の名前'] = staff_df_clean['先生の名前'].astype(str).str.strip()
 staff_df_clean = staff_df_clean[staff_df_clean['先生の名前'] != ''].reset_index(drop=True)
