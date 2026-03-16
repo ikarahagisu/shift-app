@@ -17,7 +17,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     st.markdown("""
     ### 1. 準備する（スタッフ条件データの作成）
     画面上の表（データエディタ）を直接クリックして先生の情報を入力するか、Excel等で作成したCSVファイルをアップロードしてください。
-    ※表の右上にあるメニュー（「＋」ボタン等）から、行の追加や削除ができます。
+    ※行の追加は表の右上の「＋」アイコンから。**行の削除は、消したい行の一番左端のマスをクリックして選択し、キーボードの「Delete」キーを押してください。**
     
     **【各項目の入力ルール】**
     * **【NG日】** 入れない日を半角数字で入力します。（例: `5,12,20`）
@@ -143,7 +143,7 @@ template_data = {
 }
 df_template = pd.DataFrame(template_data)
 
-st.markdown("👇 以下の表のセルをクリックして直接編集するか、CSVファイルをアップロードしてください。（表の右上にカーソルを合わせると出るアイコンから、行の追加・削除ができます）")
+st.markdown("👇 以下の表のセルをクリックして直接編集するか、CSVファイルをアップロードしてください。<br>（※行の追加は右上の「＋」アイコンから。**行の削除は、消したい行の一番左端のマスをクリックして選択し、キーボードの「Delete」キーを押してください**）", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("スタッフ条件（CSV）をアップロード（任意）", type="csv", key="staff_csv")
 
@@ -192,7 +192,7 @@ fixed_template_data = {
 df_fixed_template = pd.DataFrame(fixed_template_data)
 csv_fixed_template = df_fixed_template.to_csv(index=False).encode('shift_jis')
 
-st.markdown("👇 以下の表のセルをクリックして直接編集するか、CSVファイルをアップロードしてください。（表の右上にカーソルを合わせると出るアイコンから、行の追加・削除ができます）")
+st.markdown("👇 以下の表のセルをクリックして直接編集するか、CSVファイルをアップロードしてください。<br>（※行の追加は右上の「＋」アイコンから。**行の削除は、消したい行の一番左端のマスをクリックして選択し、キーボードの「Delete」キーを押してください**）", unsafe_allow_html=True)
 
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード（任意）", type="csv", key="fixed_csv")
 
