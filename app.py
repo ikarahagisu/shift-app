@@ -178,7 +178,7 @@ st.markdown("""
 （※日付は「4/1」や「4/1(水)」のように半角数字とスラッシュを含めて入力してください）
 """)
 
-# === ▼追加：決定済みシフト用のひな形データ作成とダウンロードボタン▼ ===
+# テンプレートデータの準備
 fixed_template_data = {
     "日付": ["3/31(火)", "4/1(水)", "4/5(日)"],
     "区分": ["平日", "平日", "休日"],
@@ -192,17 +192,10 @@ fixed_template_data = {
 df_fixed_template = pd.DataFrame(fixed_template_data)
 csv_fixed_template = df_fixed_template.to_csv(index=False).encode('shift_jis')
 
-st.download_button(
-    label="📥 過去・決定済みシフトのひな形（CSV）をダウンロード",
-    data=csv_fixed_template,
-    file_name="fixed_shift_template.csv",
-    mime="text/csv",
-)
-# ==================================================================
+st.markdown("👇 以下の表のセルをクリックして直接編集するか、CSVファイルをアップロードしてください。（右下の「＋」ボタンで行を追加できます）")
 
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード（任意）", type="csv", key="fixed_csv")
 
-# 初期表示用の空のデータフレーム（邪魔にならないよう最初は空にしておきます）
 fixed_cols = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
 fixed_df_init = pd.DataFrame(columns=fixed_cols)
 
@@ -217,6 +210,13 @@ if fixed_file is not None:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
 
 fixed_df = st.data_editor(fixed_df_init, num_rows="dynamic", use_container_width=True, key="fixed_editor", height=200)
+
+st.download_button(
+    label="📥 ひな形（CSV）をダウンロードしてExcelで編集したい場合はこちら",
+    data=csv_fixed_template,
+    file_name="fixed_shift_template.csv",
+    mime="text/csv",
+)
 
 st.divider()
 
