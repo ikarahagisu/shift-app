@@ -9,6 +9,13 @@ import re
 from ortools.sat.python import cp_model
 import jpholiday
 
+# === 列の固定機能（pinned）を安全に使うためのバージョンチェック ===
+try:
+    st_version = st.__version__.split('.')
+    pinned_supported = int(st_version[0]) > 1 or (int(st_version[0]) == 1 and int(st_version[1]) >= 41)
+except:
+    pinned_supported = False
+
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -158,7 +165,13 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"ファイルの読み込みに失敗しました。詳細: {e}")
 
-staff_df = st.data_editor(staff_df_init, num_rows="dynamic", use_container_width=True, key="staff_editor", height=300)
+# === ▼変更：先生の名前の列を左側に固定する設定を追加▼ ===
+staff_col_config = {}
+if pinned_supported:
+    staff_col_config["先生の名前"] = st.column_config.TextColumn(pinned=True)
+
+staff_df = st.data_editor(staff_df_init, num_rows="dynamic", use_container_width=True, key="staff_editor", height=300, column_config=staff_col_config)
+# ========================================================
 
 csv_template = df_template.to_csv(index=False).encode('shift_jis')
 st.download_button(
@@ -209,7 +222,13 @@ if fixed_file is not None:
     except Exception as e:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
 
-fixed_df = st.data_editor(fixed_df_init, num_rows="dynamic", use_container_width=True, key="fixed_editor", height=200)
+# === ▼変更：日付の列を左側に固定する設定を追加▼ ===
+fixed_col_config = {}
+if pinned_supported:
+    fixed_col_config["日付"] = st.column_config.TextColumn(pinned=True)
+
+fixed_df = st.data_editor(fixed_df_init, num_rows="dynamic", use_container_width=True, key="fixed_editor", height=200, column_config=fixed_col_config)
+# ========================================================
 
 st.download_button(
     label="📥 ひな形（CSV）をダウンロードしてExcelで編集したい場合はこちら",
@@ -697,16 +716,16 @@ if len(staff_df_clean) > 0:
                     df_summary = pd.DataFrame(summary_list)
                     df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '土日祝の回数', '総合計', '希望日の達成', '最小間隔', '平均間隔']]
                     
-                    styled_summary = df_summary.style.format(
-                        {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
-                    ).set_properties(
-                        subset=['総合計'], **{'font-weight': 'bold'}
-                    ).set_properties(
-                        subset=['希望日の達成'], **{'text-align': 'center'}
-                    )
-                    
-                    summary_height = len(df_summary) * 35 + 40
-                    st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=summary_height)
+                    # === ▼変更：実績表の「先生の名前」も左側に固定する設定を追加▼ ===
+                    summary_col_config = {}
+                    if pinned_supported:
+                        summary_col_config["先生の名前"] = st.column_config.TextColumn(pinned=True)
+                    summary_col_config["最小間隔"] = st.column_config.NumberColumn(format="%d")
+                    summary_col_config["平均間隔"] = st.column_config.NumberColumn(format="%.1f")
+
+                    # スタイル設定を外して、Streamlit標準の表（固定機能対応）に変更
+                    st.dataframe(df_summary, use_container_width=True, hide_index=True, height=summary_height, column_config=summary_col_config)
+                    # ==========================================================
                     
                     csv_result = df_result.to_csv(index=False).encode('shift_jis')
                     st.download_button(
