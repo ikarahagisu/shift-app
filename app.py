@@ -194,18 +194,18 @@ if uploaded_file is not None:
 else:
     base_df = df_template.copy()
 
-# ゴミデータ列（Unnamed: 0等）があれば削除
-base_df = base_df.loc[:, ~base_df.columns.str.contains('^Unnamed')]
+if "先生の名前" in base_df.columns:
+    base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は**直接クリックして文字を入力**できます。")
-# 先生の名前を通常の列に戻し、hide_index=True でスッキリ表示させます
-edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=300)
+st.write("※以下の表は**直接クリックして文字を入力**できます。右にスクロールしても「先生の名前」は固定されます。")
+edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
 
-staff_df = edited_df.copy()
+staff_df = edited_df.reset_index()
 
 st.divider()
 
+# === ▼NEW：過去・決定済みシフトも画面で手打ち編集できるように変更▼ ===
 st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があればアップロードしてください。
@@ -214,7 +214,7 @@ st.markdown("""
 
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
 
-fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+fixed_columns = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
 if fixed_file is not None:
     try:
         f_bytes = fixed_file.getvalue()
@@ -222,29 +222,18 @@ if fixed_file is not None:
             base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='shift_jis')
         except UnicodeDecodeError:
             base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='utf-8')
-            
-        # CSVから読み込んだ際のゴミデータ（名無しの列）を撃退！
-        base_fixed_df = base_fixed_df.loc[:, ~base_fixed_df.columns.str.contains('^Unnamed')]
-        
-        # 古いCSVの「区分」を「平日/休日」に自動変換
-        if '区分' in base_fixed_df.columns and '平日/休日' not in base_fixed_df.columns:
-            base_fixed_df = base_fixed_df.rename(columns={'区分': '平日/休日'})
-            
-        # 余計な列が含まれていたら無視する
-        cols_to_keep = [col for col in fixed_columns if col in base_fixed_df.columns]
-        base_fixed_df = base_fixed_df[cols_to_keep]
-        
     except Exception as e:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
         base_fixed_df = pd.DataFrame(columns=fixed_columns)
 else:
+    # ファイルがない場合は空のデータフレームを作り、1行目だけ空欄の行を用意しておく
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
-st.write("※CSVを使わずに、下の表の**「日付」列**に 4/1 のように入力し、その横の**「宿直A」などのマス**の中に直接 先生の名前 を手打ちすることもできます。")
-# 一番左に表示されるチェックボックスは行削除用です
-edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=200)
+st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
+edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+# ======================================================================
 
 st.divider()
 
@@ -320,7 +309,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                     active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                                     if s_type not in active_shifts:
                                         day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
-                                        invalid_requests.append(f"❌ **「決定済みシフト(CSV/入力)」のエラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
+                                        invalid_requests.append(f"❌ **「決定済みシフト(入力欄)」のエラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
                                     else:
                                         absolute_req_specific[doc_val].append((d, s_type))
                                 elif date_obj < datetime.date(target_year, target_month, 1):
@@ -407,34 +396,17 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
             req_count = multi_slots_dict.get((d, s_name), 1)
             if len(req_docs) > req_count:
-                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠（定員{req_count}名）に、定員を超える先生（{', '.join(req_docs)}）が確定指定しているため、パズルが破綻しています。")
-
-        for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            req_slots = sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
-            available = sum(1 for doc in doctors if d not in ng_days[doc])
-            
-            if available < req_slots:
-                reasons.append(f"❌ **{target_month}/{d}**: 必要な枠({req_slots}枠)に対して、出勤可能な先生({available}名)が足りません。（増員設定に対してNG希望者が多すぎます）")
-            elif available <= req_slots + 2:
-                reasons.append(f"⚠️ **{target_month}/{d}**: 出勤可能な先生が{available}名しかおらず、人ごとの「最低空ける日数」ルールの影響でパズルが詰まっている可能性が高いです。")
+                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠（定員{req_count}名）に、定員を超える先生（{', '.join(req_docs)}）が確定指定（優先度100、または決定済みシフト）されているためパズルが破綻しています。")
                 
-        for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
-            req_total = sum(multi_slots_dict.get((d, s_type), 1) for d in range(1, num_days + 1) if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
-            max_available = sum(max_shifts_per_type[doc][s_type] for doc in doctors)
-            if max_available < req_total:
-                reasons.append(f"❌ **「{s_type}」枠**: 月間に必要な総枠数({req_total}枠)に対して、先生全員の「上限回数の合計」({max_available}回)が足りていません。上限を増やす必要があります。")
-                
-        theoretical_total = sum(max_shifts_total[doc] for doc in doctors)
-        req_all_slots = sum(multi_slots_dict.get((d, s), 1) for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
-        
-        if theoretical_total < req_all_slots:
-            reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、先生全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
+        abs_req_docs = [doc for doc in doctors if (d in absolute_req_days[doc] or any(sd == d for (sd, ss) in absolute_req_specific[doc]))]
+        abs_req_docs = list(set(abs_req_docs))
+        daily_req_count = sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
+        if len(abs_req_docs) > daily_req_count:
+            invalid_requests.append(f"❌ **{target_month}月{d}日**: その日の総枠数({daily_req_count}枠)に対して、確定指定が{len(abs_req_docs)}名（{', '.join(abs_req_docs)}）もいるため、全員を入れられません。")
 
-        if not reasons:
-            reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、人ごとの「最低空ける日数」や「最大回数」ルールの連鎖によってどこかの日程でパズルが破綻しています。条件の厳しい先生の設定を緩めてみてください。")
-            
-        return None, False, reasons, None, None
+    if invalid_requests:
+        unique_invalid = list(dict.fromkeys(invalid_requests))
+        return None, False, unique_invalid, None, None
 
     model = cp_model.CpModel()
     shifts = {}
@@ -568,7 +540,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
             day_str = "休日" if is_holiday(target_year, target_month, d) else "平日"
-            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": day_str}
+            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "区分": day_str}
             
             for s in NIGHT_SHIFTS + DAY_SHIFTS:
                 row[s] = "-"
@@ -631,8 +603,10 @@ st.header("3. シフトの自動生成")
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
+# === ▼NEW：画面入力された「決定済みシフト」の空行を取り除く処理▼ ===
 fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
 fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
+# ====================================================================
 
 if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
     with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
@@ -644,9 +618,9 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 
                 def highlight_holidays(row):
                     styles = [''] * len(row)
-                    if row['平日/休日'] == '休日':
+                    if row['区分'] == '休日':
                         for i, col in enumerate(row.index):
-                            if col in ['日付', '平日/休日']: 
+                            if col in ['日付', '区分']: 
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
@@ -713,7 +687,7 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         doc_data[s] = count
                         total_count += count
-                        hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                        hol_count += sum(1 for val in df_result[df_result['区分'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                                 
                     doc_data["土日祝の回数"] = hol_count
                     doc_data["総合計"] = total_count
