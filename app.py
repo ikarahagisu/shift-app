@@ -43,9 +43,10 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。
     
     👑 **【超便利機能：過去や決定済みのシフトも考慮する】**
-    「2. 過去・決定済みシフトの読み込み（任意）」に、このアプリで出力したシフト表をそのままアップロードできます。
+    「2. 過去・決定済みシフトの読み込み・入力（任意）」に、このアプリで出力したシフト表をそのままアップロードできます。
     * **先月のシフトを入れた場合**: 前月末の勤務を考慮し、月初の間隔ルールをしっかり守ります。
     * **今月の途中まで作ったシフトを入れた場合**: その部分は「確定」として固定し、残りの空き枠（空白の部分）だけをAIが綺麗に埋めてくれます！
+    * ※CSVを読み込まずに、画面上の表に直接「日付」と「先生の名前」を手入力することも可能です。
     """)
 
 # ==========================================
@@ -185,7 +186,6 @@ with col_dl:
 with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（CSV）をアップロード", type="csv", key="staff_csv")
 
-# CSVがアップロードされればそれを基準に、なければひな形を基準にする
 if uploaded_file is not None:
     try:
         base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='shift_jis')
@@ -194,27 +194,47 @@ if uploaded_file is not None:
 else:
     base_df = df_template.copy()
 
-# === ▼変更：先生の名前を「インデックス（見出し）」にして左側に固定する▼ ===
 if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は**直接クリックして文字を入力**できます。右にスクロールしても「先生の名前」は固定されます。")
-# 画面上の表（先生の名前が左に固定されます）
 edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
 
-# 計算用に元の形（列）に戻す
 staff_df = edited_df.reset_index()
-# ==========================================================================
 
 st.divider()
 
-st.header("2. 過去・決定済みシフトの読み込み（任意）")
+# === ▼NEW：過去・決定済みシフトも画面で手打ち編集できるように変更▼ ===
+st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があればアップロードしてください。
 前後の月のシフト間隔を考慮したり、確定済みの枠を固定して残りの空白をAIに計算させることができます。
 """)
+
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
+
+fixed_columns = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+if fixed_file is not None:
+    try:
+        f_bytes = fixed_file.getvalue()
+        try:
+            base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='shift_jis')
+        except UnicodeDecodeError:
+            base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='utf-8')
+    except Exception as e:
+        st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
+        base_fixed_df = pd.DataFrame(columns=fixed_columns)
+else:
+    # ファイルがない場合は空のデータフレームを作り、1行目だけ空欄の行を用意しておく
+    base_fixed_df = pd.DataFrame(columns=fixed_columns)
+    base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+
+st.markdown("##### 📅 決定済みシフトの入力・編集")
+st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
+edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+# ======================================================================
+
 st.divider()
 
 # ==========================================
@@ -289,7 +309,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                     active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                                     if s_type not in active_shifts:
                                         day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
-                                        invalid_requests.append(f"❌ **「決定済みシフト(CSV)」の入力エラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
+                                        invalid_requests.append(f"❌ **「決定済みシフト(入力欄)」のエラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
                                     else:
                                         absolute_req_specific[doc_val].append((d, s_type))
                                 elif date_obj < datetime.date(target_year, target_month, 1):
@@ -580,20 +600,13 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 st.divider()
 st.header("3. シフトの自動生成")
 
-# 空の行（先生の名前がない行）を除外
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
-fixed_df = None
-if fixed_file is not None:
-    try:
-        f_bytes = fixed_file.getvalue()
-        try:
-            fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='shift_jis')
-        except UnicodeDecodeError:
-            fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='utf-8')
-    except Exception as e:
-        st.warning(f"過去シフトファイルの読み込みに失敗しました（無視して続行します）。詳細: {e}")
+# === ▼NEW：画面入力された「決定済みシフト」の空行を取り除く処理▼ ===
+fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
+fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
+# ====================================================================
 
 if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
     with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
@@ -706,7 +719,6 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 df_summary = pd.DataFrame(summary_list)
                 df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '土日祝の回数', '総合計', '希望日の達成', '最小間隔', '平均間隔']]
                 
-                # === ▼変更：実績表の「先生の名前」をインデックスにして左側に固定する▼ ===
                 df_summary = df_summary.set_index('先生の名前')
                 
                 styled_summary = df_summary.style.format(
@@ -718,9 +730,7 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 )
                 
                 summary_height = len(df_summary) * 35 + 40
-                # hide_index=False にすることで、インデックス（名前）を表示したまま固定します
                 st.dataframe(styled_summary, use_container_width=True, height=summary_height)
-                # =========================================================================
                 
                 csv_result = df_result.to_csv(index=False).encode('shift_jis')
                 st.download_button(
