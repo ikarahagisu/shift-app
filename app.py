@@ -232,7 +232,8 @@ else:
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
 st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
-edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+# === ▼ココを修正！ hide_index=True を追加して左端の「0」を隠しました▼ ===
+edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=200)
 # ======================================================================
 
 st.divider()
