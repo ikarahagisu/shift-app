@@ -43,7 +43,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     条件を入力し、「🚀 自動生成」ボタンを押します。
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。
     
-    👑 **【超便利機能：過去や決定済みのシフトも考慮する】**
+    **【過去や決定済みのシフトを考慮する】**
     「2. 過去・決定済みシフトの読み込み・入力（任意）」に、このアプリで出力したシフト表をそのままアップロードできます。
     * **先月のシフトを入れた場合**: 前月末の勤務を考慮し、月初の間隔ルールをしっかり守ります。
     * **今月の途中まで作ったシフトを入れた場合**: その部分は「確定」として固定し、残りの空き枠（空白の部分）だけをAIが綺麗に埋めてくれます！
@@ -163,7 +163,7 @@ template_data = {
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
-    "月間最小回数": [1, 2, 0, 1, 0], # <--- NEW: 月間最小回数を追加
+    "月間最小回数": [1, 2, 0, 1, 0],
     "月間最大回数": [5, 6, 4, 5, 7],    
     "宿直A上限": [2, 2, 2, 2, 2],
     "宿直B上限": [2, 2, 2, 2, 2],
@@ -283,7 +283,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     req_priority = {} 
     
     min_intervals = {}
-    min_shifts_total = {} # <--- NEW: 最小回数の格納
+    min_shifts_total = {}
     max_shifts_total = {}
     max_shifts_per_type = {}
     
@@ -377,10 +377,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
-        
-        # === ▼NEW：月間最小回数の読み込み（無い場合は0）▼ ===
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
-        # ====================================================
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
 
         max_shifts_per_type[doc] = {
@@ -483,11 +480,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if worked_all:
             all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
             actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
-            # === ▼NEW：最小回数を計算に反映（最大回数と矛盾しないよう安全処理）▼ ===
             actual_min_total = min(min_shifts_total[doc], actual_max_total)
             model.Add(sum(worked_all) <= actual_max_total)
             model.Add(sum(worked_all) >= actual_min_total)
-            # =======================================================================
 
     for doc in doctors:
         interval = min_intervals[doc]
@@ -618,11 +613,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if theoretical_total < req_all_slots:
             reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、先生全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
 
-        # === ▼NEW：最小回数が多すぎて枠に入りきらない場合のエラー▼ ===
         theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
         if theoretical_min_total > req_all_slots:
             reasons.append(f"❌ **最小回数の設定オーバー**: 先生全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
-        # ================================================================
 
         if not reasons:
             reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、人ごとの「最低空ける日数」や「最大回数」ルールの連鎖によってどこかの日程でパズルが破綻しています。条件の厳しい先生の設定を緩めてみてください。")
