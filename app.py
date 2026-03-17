@@ -29,6 +29,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
         * 例：Dr. Aを `10`、Dr. Bを `1` にして同じ日を希望して競合した場合、AIはDr. Aの希望を優先的に叶えます（※ただし間隔などのルール範囲内）。
         * **特例（絶対希望）**：ここを `100` 以上にすると、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。
     * **【最低空ける日数】** シフトとシフトの間を最低何日空けるかです。（人ごとに設定できます）
+    * **【月間最小回数】** その月に入るシフトの「最低保証」回数です。（未入力や空欄の場合は0回扱いになります）
     * **【月間最大回数】** その月に入るすべてのシフトの「総合計」の上限回数です。（人ごとに設定できます）
     * **【各種上限】** 「宿直A」「日直B」など枠ごとの上限回数です。
     * **【備考】** メモや説明などを自由に書き込める欄です。（AIの計算には影響しません）
@@ -162,6 +163,7 @@ template_data = {
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
+    "月間最小回数": [1, 2, 0, 1, 0], # <--- NEW: 月間最小回数を追加
     "月間最大回数": [5, 6, 4, 5, 7],    
     "宿直A上限": [2, 2, 2, 2, 2],
     "宿直B上限": [2, 2, 2, 2, 2],
@@ -205,7 +207,6 @@ staff_df = edited_df.reset_index()
 
 st.divider()
 
-# === ▼NEW：セクション2のレイアウトをセクション1と統一▼ ===
 st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があればアップロードしてください。
@@ -227,7 +228,6 @@ with col_dl_fixed:
     )
 with col_ul_fixed:
     fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
-# ==========================================================
 
 if fixed_file is not None:
     try:
@@ -243,7 +243,6 @@ if fixed_file is not None:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
         base_fixed_df = pd.DataFrame(columns=fixed_columns)
 else:
-    # ファイルがない場合は空のデータフレームを作り、1行目だけ空欄の行を用意しておく
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
@@ -254,7 +253,6 @@ st.markdown("##### 📅 決定済みシフトの入力・編集")
 st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
-# 計算用に見えないところで元の形に戻す
 edited_fixed_df = edited_fixed_df_raw.reset_index()
 
 st.divider()
@@ -285,6 +283,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     req_priority = {} 
     
     min_intervals = {}
+    min_shifts_total = {} # <--- NEW: 最小回数の格納
     max_shifts_total = {}
     max_shifts_per_type = {}
     
@@ -378,6 +377,10 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
+        
+        # === ▼NEW：月間最小回数の読み込み（無い場合は0）▼ ===
+        min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
+        # ====================================================
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
 
         max_shifts_per_type[doc] = {
@@ -480,7 +483,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if worked_all:
             all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
             actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
+            # === ▼NEW：最小回数を計算に反映（最大回数と矛盾しないよう安全処理）▼ ===
+            actual_min_total = min(min_shifts_total[doc], actual_max_total)
             model.Add(sum(worked_all) <= actual_max_total)
+            model.Add(sum(worked_all) >= actual_min_total)
+            # =======================================================================
 
     for doc in doctors:
         interval = min_intervals[doc]
@@ -610,6 +617,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         
         if theoretical_total < req_all_slots:
             reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、先生全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
+
+        # === ▼NEW：最小回数が多すぎて枠に入りきらない場合のエラー▼ ===
+        theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
+        if theoretical_min_total > req_all_slots:
+            reasons.append(f"❌ **最小回数の設定オーバー**: 先生全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
+        # ================================================================
 
         if not reasons:
             reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、人ごとの「最低空ける日数」や「最大回数」ルールの連鎖によってどこかの日程でパズルが破綻しています。条件の厳しい先生の設定を緩めてみてください。")
