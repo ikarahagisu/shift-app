@@ -205,7 +205,6 @@ staff_df = edited_df.reset_index()
 
 st.divider()
 
-# === ▼NEW：過去・決定済みシフトも画面で手打ち編集できるように変更▼ ===
 st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があればアップロードしてください。
@@ -214,7 +213,8 @@ st.markdown("""
 
 fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
 
-fixed_columns = ["日付", "区分", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+# === ▼変更：「区分」を「平日/休日」に変更▼ ===
+fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
 if fixed_file is not None:
     try:
         f_bytes = fixed_file.getvalue()
@@ -226,13 +226,13 @@ if fixed_file is not None:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
         base_fixed_df = pd.DataFrame(columns=fixed_columns)
 else:
-    # ファイルがない場合は空のデータフレームを作り、1行目だけ空欄の行を用意しておく
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
 st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
-edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+# === ▼変更：hide_index=True を追加して「0」を隠す▼ ===
+edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=200)
 # ======================================================================
 
 st.divider()
@@ -309,7 +309,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                     active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                                     if s_type not in active_shifts:
                                         day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
-                                        invalid_requests.append(f"❌ **「決定済みシフト(入力欄)」のエラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
+                                        invalid_requests.append(f"❌ **「決定済みシフト(CSV)」の入力エラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
                                     else:
                                         absolute_req_specific[doc_val].append((d, s_type))
                                 elif date_obj < datetime.date(target_year, target_month, 1):
@@ -540,7 +540,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
             day_str = "休日" if is_holiday(target_year, target_month, d) else "平日"
-            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "区分": day_str}
+            # === ▼変更：出力データのキーも「平日/休日」に変更▼ ===
+            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": day_str}
+            # =======================================================
             
             for s in NIGHT_SHIFTS + DAY_SHIFTS:
                 row[s] = "-"
@@ -603,10 +605,8 @@ st.header("3. シフトの自動生成")
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
-# === ▼NEW：画面入力された「決定済みシフト」の空行を取り除く処理▼ ===
 fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
 fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
-# ====================================================================
 
 if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
     with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
@@ -618,9 +618,10 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 
                 def highlight_holidays(row):
                     styles = [''] * len(row)
-                    if row['区分'] == '休日':
+                    # === ▼変更：色付けの判定も「平日/休日」に変更▼ ===
+                    if row['平日/休日'] == '休日':
                         for i, col in enumerate(row.index):
-                            if col in ['日付', '区分']: 
+                            if col in ['日付', '平日/休日']: 
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
@@ -687,7 +688,8 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         doc_data[s] = count
                         total_count += count
-                        hol_count += sum(1 for val in df_result[df_result['区分'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                        # === ▼変更：集計の条件も「平日/休日」に変更▼ ===
+                        hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                                 
                     doc_data["土日祝の回数"] = hol_count
                     doc_data["総合計"] = total_count
