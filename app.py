@@ -198,7 +198,7 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は**直接クリックして文字を入力**できます。右にスクロールしても「先生の名前」は固定されます。")
+st.write("※以下の表は**直接クリックして文字を入力**できます。")
 edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
 
 staff_df = edited_df.reset_index()
@@ -229,7 +229,6 @@ else:
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
-# === ▼ココを追加！ 1の表と同じように「日付」をインデックスにして左に固定＆0を消す▼ ===
 if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
