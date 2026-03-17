@@ -199,7 +199,6 @@ if "先生の名前" in base_df.columns:
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は**直接クリックして文字を入力**できます。")
-st.markdown("**⬇️ 一番左の列は【先生の名前】です**")
 edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
 
 staff_df = edited_df.reset_index()
@@ -229,18 +228,18 @@ if fixed_file is not None:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
         base_fixed_df = pd.DataFrame(columns=fixed_columns)
 else:
+    # ファイルがない場合は空のデータフレームを作り、1行目だけ空欄の行を用意しておく
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
-# === ▼ココを追加！ 1の表と同じように「日付」をインデックスにして左端の0を消す▼ ===
 if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
 st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
-st.markdown("**⬇️ 一番左の列は【日付】です**")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
+# 計算用に見えないところで元の形に戻す
 edited_fixed_df = edited_fixed_df_raw.reset_index()
 # ======================================================================================
 
@@ -549,7 +548,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
             day_str = "休日" if is_holiday(target_year, target_month, d) else "平日"
-            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": day_str}
+            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "区分": day_str}
             
             for s in NIGHT_SHIFTS + DAY_SHIFTS:
                 row[s] = "-"
@@ -625,9 +624,9 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 
                 def highlight_holidays(row):
                     styles = [''] * len(row)
-                    if row['平日/休日'] == '休日':
+                    if row['区分'] == '休日':
                         for i, col in enumerate(row.index):
-                            if col in ['日付', '平日/休日']: 
+                            if col in ['日付', '区分']: 
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
@@ -694,7 +693,7 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         doc_data[s] = count
                         total_count += count
-                        hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                        hol_count += sum(1 for val in df_result[df_result['区分'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                                 
                     doc_data["土日祝の回数"] = hol_count
                     doc_data["総合計"] = total_count
