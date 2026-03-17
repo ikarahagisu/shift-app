@@ -205,7 +205,6 @@ staff_df = edited_df.reset_index()
 
 st.divider()
 
-# === ▼NEW：過去・決定済みシフトも画面で手打ち編集できるように変更▼ ===
 st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
 st.markdown("""
 先月分や来月分のシフト表、または今月の「一部だけ人間が確定させたシフト表」があればアップロードしてください。
@@ -230,11 +229,17 @@ else:
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
+# === ▼ココを追加！ 1の表と同じように「日付」をインデックスにして左に固定＆0を消す▼ ===
+if "日付" in base_fixed_df.columns:
+    base_fixed_df = base_fixed_df.set_index("日付")
+
 st.markdown("##### 📅 決定済みシフトの入力・編集")
 st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
-# === ▼ココを修正！ hide_index=True を追加して左端の「0」を隠しました▼ ===
-edited_fixed_df = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, hide_index=True, height=200)
-# ======================================================================
+edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+
+# 計算用に見えないところで元の形に戻す
+edited_fixed_df = edited_fixed_df_raw.reset_index()
+# ======================================================================================
 
 st.divider()
 
