@@ -194,11 +194,18 @@ if uploaded_file is not None:
 else:
     base_df = df_template.copy()
 
-# === ▼NEW：画面上で直接編集できるExcel風エディタ▼ ===
+# === ▼変更：先生の名前を「インデックス（見出し）」にして左側に固定する▼ ===
+if "先生の名前" in base_df.columns:
+    base_df = base_df.set_index("先生の名前")
+
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は**直接クリックして文字を入力**できます。行の下の「＋追加」で先生を増やしたり、行を選択して「Deleteキー」で削除することも可能です！")
-staff_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
-# ====================================================
+st.write("※以下の表は**直接クリックして文字を入力**できます。右にスクロールしても「先生の名前」は固定されます。")
+# 画面上の表（先生の名前が左に固定されます）
+edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
+
+# 計算用に元の形（列）に戻す
+staff_df = edited_df.reset_index()
+# ==========================================================================
 
 st.divider()
 
@@ -574,6 +581,7 @@ st.divider()
 st.header("3. シフトの自動生成")
 
 # 空の行（先生の名前がない行）を除外
+staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
 fixed_df = None
@@ -698,6 +706,9 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 df_summary = pd.DataFrame(summary_list)
                 df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '土日祝の回数', '総合計', '希望日の達成', '最小間隔', '平均間隔']]
                 
+                # === ▼変更：実績表の「先生の名前」をインデックスにして左側に固定する▼ ===
+                df_summary = df_summary.set_index('先生の名前')
+                
                 styled_summary = df_summary.style.format(
                     {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
                 ).set_properties(
@@ -707,7 +718,9 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 )
                 
                 summary_height = len(df_summary) * 35 + 40
-                st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=summary_height)
+                # hide_index=False にすることで、インデックス（名前）を表示したまま固定します
+                st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+                # =========================================================================
                 
                 csv_result = df_result.to_csv(index=False).encode('shift_jis')
                 st.download_button(
