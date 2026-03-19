@@ -294,7 +294,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     invalid_requests = []
 
-    # 決定済みシフトの読み込み
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
             date_str = str(row.get('日付', ''))
@@ -339,7 +338,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                 else:
                                     future_worked_dates[doc_val].append(date_obj)
 
-    # スタッフ条件の読み込み
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
@@ -391,7 +389,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
     
-    # エラーチェック
     for doc in doctors:
         for d in req_days[doc]:
             if not (1 <= d <= num_days):
@@ -433,7 +430,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         unique_invalid = list(dict.fromkeys(invalid_requests))
         return None, False, unique_invalid, None, None, False
 
-    # === ▼NEW：内部関数化して「お助けモード（制限解除）」を可能にする▼ ===
     def attempt_solve(relax_rules=False):
         model = cp_model.CpModel()
         shifts = {}
@@ -449,6 +445,18 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             for s in active_shifts:
                 req_count = multi_slots_dict.get((d, s), 1)
                 model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == req_count)
+
+        # === ▼追加：1日1シフトの絶対制約（お助けモードでも絶対死守）▼ ===
+        for doc in doctors:
+            for d in range(1, num_days + 1):
+                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                
+                # 人間が意図的に「1日2回」固定入力している分は許可する安全設計
+                fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in active_shifts)
+                max_shifts_today = max(1, fixed_count)
+                
+                model.Add(sum(shifts[(d, doc, s)] for s in active_shifts) <= max_shifts_today)
+        # ==============================================================
 
         for doc in doctors:
             for d in ng_days[doc]:
@@ -487,12 +495,10 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
                 model.Add(sum(worked_all) <= actual_max_total)
                 
-                # お助けモードでない場合のみ「最小回数」を厳守する
                 if not relax_rules:
                     actual_min_total = min(min_shifts_total[doc], actual_max_total)
                     model.Add(sum(worked_all) >= actual_min_total)
 
-        # お助けモードでない場合のみ「最低空ける日数」を厳守する
         if not relax_rules:
             for doc in doctors:
                 interval = min_intervals[doc]
@@ -569,11 +575,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         
         return status, solver, shifts
 
-    # 1回目の計算（ルール厳守モード）
     status, solver, shifts = attempt_solve(relax_rules=False)
     is_relaxed = False
     
-    # ルール厳守で解けなかった場合、2回目の計算（お助けモード）
     if status not in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
         status, solver, shifts = attempt_solve(relax_rules=True)
         is_relaxed = True
@@ -634,6 +638,10 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if theoretical_total < req_all_slots:
             reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、先生全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
 
+        theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
+        if theoretical_min_total > req_all_slots:
+            reasons.append(f"❌ **最小回数の設定オーバー**: 先生全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
+
         if not reasons:
             reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールが複雑すぎて破綻しています。")
             
@@ -657,12 +665,10 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
             df_result, success, error_reasons, past_worked_dates, future_worked_dates, is_relaxed = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
             
             if success:
-                # === ▼NEW：お助けモード発動時は黄色の警告メッセージを出す▼ ===
                 if is_relaxed:
                     st.warning("⚠️ **【緊急お助けモードで作成しました】**\n\n入力されたNG日や条件が複雑で、AIが「ルールを全て守って作成するのは不可能」と判断しました。そのため今回は特別に**「最低空ける日数」と「月間最小回数」のルールを無視して、強制的にシフトを完成**させました！\n誰かに連勤が発生している可能性があるため、必ず下部の「実績表」を確認して人間が微調整してください。")
                 else:
                     st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
-                # ==============================================================
                 
                 def highlight_holidays(row):
                     styles = [''] * len(row)
@@ -778,7 +784,7 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 )
                 
                 summary_height = len(df_summary) * 35 + 40
-                st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+                st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=summary_height)
                 
                 csv_result = df_result.to_csv(index=False).encode('shift_jis')
                 st.download_button(
