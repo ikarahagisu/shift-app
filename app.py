@@ -446,17 +446,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 req_count = multi_slots_dict.get((d, s), 1)
                 model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == req_count)
 
-        # === ▼追加：1日1シフトの絶対制約（お助けモードでも絶対死守）▼ ===
         for doc in doctors:
             for d in range(1, num_days + 1):
                 active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                 
-                # 人間が意図的に「1日2回」固定入力している分は許可する安全設計
                 fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in active_shifts)
                 max_shifts_today = max(1, fixed_count)
                 
                 model.Add(sum(shifts[(d, doc, s)] for s in active_shifts) <= max_shifts_today)
-        # ==============================================================
 
         for doc in doctors:
             for d in ng_days[doc]:
@@ -783,8 +780,10 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                     subset=['希望日の達成'], **{'text-align': 'center'}
                 )
                 
+                # === ▼ココを修正！hide_index=Trueを削除して名前を表示▼ ===
                 summary_height = len(df_summary) * 35 + 40
-                st.dataframe(styled_summary, use_container_width=True, hide_index=True, height=summary_height)
+                st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+                # ==========================================================
                 
                 csv_result = df_result.to_csv(index=False).encode('shift_jis')
                 st.download_button(
