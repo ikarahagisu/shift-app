@@ -68,6 +68,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
+    * **【入りにくい曜日(メモ用)】** 「水,木」のように入力しておくと、NGカレンダーでその曜日が黄色くハイライトされ、休みたい日を選ぶ際の目印になります。
     * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
@@ -287,8 +288,10 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
+# ▼ テンプレートに「入りにくい曜日」を追加 ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
+    "入りにくい曜日(メモ用)": ["水,木", "", "土,日", "", ""],
     "NG日(半角カンマ区切り)": ["(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)", "", "", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
@@ -327,6 +330,10 @@ if uploaded_file is not None:
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
     base_df = parse_staff_csv(uploaded_file.getvalue())
+    
+    # ▼ 古いCSVにも対応できるよう、列がなければ追加する ▼
+    if "入りにくい曜日(メモ用)" not in base_df.columns:
+        base_df.insert(1, "入りにくい曜日(メモ用)", "")
 else:
     base_df = df_template.copy()
 
@@ -362,6 +369,21 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
+            # ▼ 「入りにくい曜日」の文字列からハイライトすべき列番号を抽出 ▼
+            hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(メモ用)", ""))
+            hard_days = []
+            for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
+                if w in hard_str:
+                    hard_days.append(i)
+            
+            # 指定された曜日の列背景を黄色くするCSSを動的に生成
+            if hard_days:
+                css_rules = ""
+                for hd in hard_days:
+                    # nth-childは1スタートなので hd+1
+                    css_rules += f'div[data-testid="stForm"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}) {{ background-color: #fff9c4 !important; border: 1px solid #fde047 !important; }}\n'
+                st.markdown(f"<style>{css_rules}</style>", unsafe_allow_html=True)
+
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
             current_ng_list = []
@@ -379,7 +401,6 @@ if not valid_staff.empty:
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = (d in current_ng_list)
 
-            # 現在保存されているNG日を一目でわかるようにリアルタイム表示
             current_ngs = [d for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             
             if current_ngs:
@@ -389,8 +410,13 @@ if not valid_staff.empty:
                 st.info("💡 **保存済みのNG日はありません**")
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
-                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
+                # CSSスコープ用の見えないマーカー
+                st.markdown(f'<div class="marker-tab-{t_idx}" style="display:none;"></div>', unsafe_allow_html=True)
                 
+                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
+                if hard_days:
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」が黄色くハイライトされています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
+
                 # 曜日のヘッダー行
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
@@ -423,7 +449,6 @@ if not valid_staff.empty:
                 
                 submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を確定する", type="primary")
             
-            # ▼ カレンダー（フォーム）の右下に「全選択」「全解除」を配置 ▼
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
                 st.button("全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
