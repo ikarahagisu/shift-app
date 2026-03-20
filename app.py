@@ -123,15 +123,16 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
     width: 100% !important;
 }
 
-/* ▼【ここが重要！】四角と文字が離れ離れになるのを防ぎ、中央にまとめる ▼ */
+/* ▼【ここが重要！】四角と文字を「縦並び」にして横幅の限界を突破する！ ▼ */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
     display: flex !important;
+    flex-direction: column-reverse !important; /* ← 上が「1日」、下が「チェック」になる魔法 */
     justify-content: center !important;
     align-items: center !important;
-    width: fit-content !important; /* スマホで横に広がろうとするのを防ぐ */
-    margin: 0 auto !important; /* 全体をマスの中央に寄せる */
+    width: 100% !important;
+    margin: 0 auto !important; 
     padding: 0 !important;
-    gap: 4px !important; /* 四角と文字の適度な隙間 */
+    gap: 4px !important; /* 四角と文字の適度な縦の隙間 */
 }
 </style>
 """, unsafe_allow_html=True)
