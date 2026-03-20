@@ -79,80 +79,34 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。完成した表はCSVでダウンロードできます。
     """)
 
-# === ▼完全版：白抜きを撲滅し、完全な格子状・中央揃えを実現するCSS▼ ===
+# === ▼カイゼン：もっちりさんのご提案通り「すべて左揃え」の安定した格子状CSS▼ ===
 st.markdown("""
 <style>
-/* カレンダーの7列ブロックの隙間を消して密着させる */
+/* カレンダーの7列ブロックの隙間を消して密着（格子状）にする */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     gap: 0 !important;
 }
 
-/* 各マスの枠線を設定し、内側の余白（謎の白抜き）を強制ゼロにする */
+/* 各マスの枠線を設定 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
-    border: 1px solid #b0b0b0 !important;
-    margin-right: -1px !important; /* 枠線の二重描画を防ぐ */
-    margin-bottom: -1px !important;
-    padding: 0 !important; /* ←白抜きの原因（パディング）を消す魔法です */
+    border: 1px solid #d0d0d0;
+    margin-right: -1px; /* 枠線の二重描画を防ぐ */
+    margin-bottom: -1px;
+    padding: 10px !important; /* 左寄せのまま、ほどよい余白をとる */
     background-color: #ffffff;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    min-height: 60px !important;
+    min-height: 60px;
 }
 
-/* Streamlitが勝手に作る内部ブロックの余白もゼロにし、中央配置を継承させる */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] > div[data-testid="stVerticalBlock"] {
-    padding: 0 !important;
-    gap: 0 !important;
-    width: 100% !important;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
+/* 曜日ヘッダーの背景色を少しグレーに */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(div[data-testid="stCheckbox"])) > div[data-testid="column"] {
+    background-color: #f8f9fa;
+    min-height: 40px;
+    padding: 10px !important;
 }
 
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div.element-container {
-    margin: 0 !important;
-    padding: 0 !important;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    width: 100% !important;
-}
-
-/* --- テキストや色付き背景（休日セル）の完全中央揃え --- */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
-    width: 100% !important;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-}
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] > p {
-    width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-}
-
-/* --- 平日セル（チェックボックス）の完全中央揃え --- */
+/* チェックボックスの余計な隙間を詰める */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    width: 100% !important;
     margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* ▼ここが最も重要：チェックボックスの塊を中央に寄せる魔法▼ */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
-    display: inline-flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    width: auto !important; /* 100%にしないことで、左寄りを防ぎます */
-    margin: 0 auto !important; /* 左右マージンautoで親要素のど真ん中に配置 */
-    padding: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -188,7 +142,7 @@ custom_holidays = []
 cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; min-height: 40px; background-color: #f8f9fa;'>{w}</div>", unsafe_allow_html=True)
+    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
 
 # --- 上部カレンダー日付描画 ---
 for week in cal_matrix:
@@ -200,14 +154,14 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 60px;'><b>{day}日</b><small style='line-height: 1;'>休</small></div>", unsafe_allow_html=True)
+                    # ▼ ここをチェックボックスと同じ左揃えにしました！
+                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; padding: 5px; border-radius: 5px;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
         else:
             with cols[i]:
-                # 空白の日にも枠線が出るようにdivを配置
-                st.markdown("<div style='width: 100%; height: 100%; min-height: 60px;'></div>", unsafe_allow_html=True)
+                st.write("")
 
 st.divider()
 
@@ -388,7 +342,7 @@ if not valid_staff.empty:
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; min-height: 40px; background-color: #f8f9fa;'>{w}</div>", unsafe_allow_html=True)
+                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
                 
                 # --- 下部カレンダー日付描画 ---
                 for week in cal_matrix:
@@ -399,7 +353,6 @@ if not valid_staff.empty:
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
-                            # ▼ 余分な装飾はせず、色と文字だけを活かします
                             if is_hol_or_sun:
                                 day_label = f":red[**{day}日**]"
                             elif is_sat:
@@ -414,8 +367,7 @@ if not valid_staff.empty:
                                     new_ng_list.append(day)
                         else:
                             with cols[i]:
-                                # 空白の日にも枠線が出るようにdivを配置
-                                st.markdown("<div style='width: 100%; height: 100%; min-height: 60px;'></div>", unsafe_allow_html=True)
+                                st.write("")
                 
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
