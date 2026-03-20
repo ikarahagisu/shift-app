@@ -77,7 +77,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。完成した表はCSVでダウンロードできます。
     """)
 
-# === 🌟改修：スマホで絶対に崩れないカレンダー用CSS ===
+# === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
 /* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
@@ -85,12 +85,15 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     gap: 2px !important;
+    width: 100% !important; /* ←【追加】親の枠線（フォーム等）からはみ出さない！ */
+    box-sizing: border-box !important;
 }
 
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
     min-width: 0 !important; /* スマホで綺麗に縮むようにする */
+    box-sizing: border-box !important; /* ←【追加】枠線分も含めて幅を計算させる */
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 5px 0px !important;
@@ -109,7 +112,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
     font-size: 0.8rem !important;
     text-align: center;
     margin: 0;
-    white-space: nowrap !important; /* ←【追加】文字の折り返しを禁止する魔法！ */
+    white-space: nowrap !important;
 }
 
 /* チェックボックスをセルの真ん中に配置 */
@@ -122,6 +125,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
 /* チェックボックスのヘルプアイコン（?）等で余計な余白ができないように調整 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
     padding-right: 0 !important;
+    gap: 4px !important; /* ←【追加】チェックの四角と文字の隙間を詰めて幅を節約 */
 }
 </style>
 """, unsafe_allow_html=True)
