@@ -96,45 +96,56 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 5px 0px !important;
+    padding: 8px 0px !important; /* トップの余白を固定 */
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start !important; /* ←【修正】上から詰めてベースラインを揃える */
     background-color: #ffffff;
-    overflow: hidden; /* はみ出し防止 */
+    overflow: hidden; 
 }
 
-/* スマホ用に文字サイズを調整し、絶対に改行させない（縦積み防止） */
+/* Streamlit特有の余計なマージンを消去して高さを統一 */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) .element-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+/* スマホ用に文字サイズを調整し、絶対に改行させない */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) p,
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) label,
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"],
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) span {
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) span,
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     font-size: 0.8rem !important;
     text-align: center;
-    margin: 0;
+    margin: 0 !important;
     white-space: nowrap !important;
-    word-break: keep-all !important; /* ←【追加】文字の途中での改行を完全に防ぐ */
+    word-break: keep-all !important; 
+    line-height: 1.5 !important; /* ←【修正】全文字の行間を統一 */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: center !important;
+    align-items: flex-start !important; /* 上寄せ */
     width: 100% !important;
 }
 
-/* 四角と文字を「縦並び」にして横幅の限界を突破する！ */
+/* 四角と文字を「縦並び」にする */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
     display: flex !important;
-    flex-direction: column-reverse !important; /* ← 上が「1日」、下が「チェック」になる魔法 */
-    justify-content: center !important;
+    flex-direction: column-reverse !important; 
+    justify-content: flex-start !important;
     align-items: center !important;
     width: 100% !important;
     margin: 0 auto !important; 
     padding: 0 !important;
-    gap: 4px !important; /* 四角と文字の適度な縦の隙間 */
+    gap: 6px !important; /* ←【修正】ここの隙間を休日のCSSと完全に一致させる */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -182,8 +193,8 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    # ▼ 修正：「休」のブロックにチェックボックスと全く同じ高さ(1.25rem)を持たせ、高さをピタッと揃えました ▼
-                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #ff4b4b; line-height: 1;'><b style='margin: 0; padding: 0;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
+                    # ▼ 修正：gap: 6px と上揃え（flex-start）を指定し、チェックボックスと高さを完全一致させました ▼
+                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b;'><b style='font-weight: 600;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
