@@ -89,7 +89,6 @@ div[data-testid="stCheckbox"]:has(input:checked) strong {
 </style>
 """, unsafe_allow_html=True)
 
-# 月曜始まりのカレンダー（calendar.monthcalendarはデフォルトで月曜始まりです）
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
@@ -234,7 +233,7 @@ if "先生の名前" in base_df.columns:
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表、または下のカレンダーどちらからでも設定可能です）")
 
-# === ▼UI変更：NG日の列を再び表示するように戻しました▼ ===
+# === ▼UI変更：NG日の列を非表示にする設定を削除して復活させました▼ ===
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
@@ -245,7 +244,7 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。上の表の「NG日」列にも反映されます。")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。上の表の「NG日」列にも反映され、計算に使用されます。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -255,12 +254,17 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # === ▼修正：Excelの数字の読み取り処理をより柔軟に強化（5.0などにも対応）▼ ===
+            # === ▼修正：全角数字や「None」などの文字対策を強力にしました▼ ===
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
+            # 全角数字や全角カンマを半角に自動変換
+            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
             current_ng_list = []
-            if current_ng_str and current_ng_str.strip() != "" and current_ng_str != "nan":
+            
+            # "nan" や "none" などの文字列は無視する
+            if current_ng_str and current_ng_str.lower() not in ["nan", "none", ""]:
                 for x in current_ng_str.split(','):
                     try:
+                        # "5.0"のような表記でも正しく "5" として読み取る
                         val = int(float(x.strip()))
                         if 1 <= val <= num_days:
                             current_ng_list.append(val)
@@ -291,13 +295,17 @@ if not valid_staff.empty:
                         else:
                             day_label = f"**{day}日**"
                             
+                        # === ▼修正：記憶が混ざらないように「先生の名前＋年月」の専用キーを発行▼ ===
+                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                        
                         with cols[i]:
-                            if st.checkbox(day_label, value=is_checked, key=f"ng_{original_idx}_{day}"):
+                            if st.checkbox(day_label, value=is_checked, key=chk_key):
                                 new_ng_list.append(day)
                     else:
                         with cols[i]:
                             st.write("")
             
+            # カレンダーの選択結果を裏側の計算用データに反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
@@ -438,7 +446,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         doc = str(row['先生の名前'])
         
         ng_str = str(row['NG日(半角カンマ区切り)'])
-        if pd.isna(row['NG日(半角カンマ区切り)']) or ng_str.strip() == "" or ng_str == "nan":
+        if pd.isna(row['NG日(半角カンマ区切り)']) or ng_str.strip() == "" or ng_str.lower() in ["nan", "none"]:
             ng_days[doc] = []
         else:
             try:
@@ -450,7 +458,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         req_specific[doc] = []
         if '希望日(半角カンマ区切り)' in staff_df.columns:
             req_str = str(row['希望日(半角カンマ区切り)'])
-            if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str == "nan"):
+            if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
                 req_str = req_str.replace('：', ':')
                 items = req_str.split(',')
                 for item in items:
@@ -776,7 +784,7 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                     req_spec_eval[doc] = []
                     if '希望日(半角カンマ区切り)' in staff_df.columns:
                         req_str = str(row['希望日(半角カンマ区切り)'])
-                        if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str == "nan"):
+                        if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
                             req_str = req_str.replace('：', ':')
                             for item in req_str.split(','):
                                 item = item.strip()
