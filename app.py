@@ -388,15 +388,7 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **保存済みのNG日はありません**")
 
-            st.markdown("<span style='font-size: 0.8rem; color: #666;'>▼ 補助機能（一括操作）</span>", unsafe_allow_html=True)
-            col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 7])
-            with col_btn1:
-                st.button("全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True))
-            with col_btn2:
-                st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False))
-
             with st.form(key=f"ng_form_{original_idx}", border=False):
-                # ▼ 赤いボタンに変更した説明文 ▼
                 st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
                 
                 # 曜日のヘッダー行
@@ -430,6 +422,13 @@ if not valid_staff.empty:
                                 st.write("")
                 
                 submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を確定する", type="primary")
+            
+            # ▼ カレンダー（フォーム）の右下に「全選択」「全解除」を配置 ▼
+            _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
+            with col_btn1:
+                st.button("全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
+            with col_btn2:
+                st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
             
             # 最新の状態を常に staff_df に反映
             current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
