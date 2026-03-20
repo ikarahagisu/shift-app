@@ -65,7 +65,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 
     #### 2. スタッフ条件の読み込み・入力（必須）
     まずは「📥 ひな形（CSV）」をダウンロードしてExcelで基本情報を入力し、アップロードするのがおすすめです。もちろん、画面上の表を直接クリックして編集することも可能です。
-    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日をポチポチ選んで、最後に**【確定する】**を押します。
+    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んでください（**自動的に保存されます**）。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
@@ -375,6 +375,15 @@ if not valid_staff.empty:
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = (d in current_ng_list)
 
+            # ▼ 追加：現在保存されているNG日を一目でわかるようにリアルタイム表示！ ▼
+            current_ngs = [d for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
+            
+            if current_ngs:
+                saved_dates_str = ", ".join([f"{d}日" for d in current_ngs])
+                st.success(f"✅ **保存済みのNG日:** {saved_dates_str}")
+            else:
+                st.info("💡 **保存済みのNG日はありません**")
+
             st.write("▼ **一括操作**")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
@@ -382,50 +391,43 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
-            with st.form(key=f"ng_form_{original_idx}", border=False):
-                st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
-                
-                new_ng_list = []
-                
-                # 曜日のヘッダー行
+            # ▼ 修正：フォーム（確定するボタン）をなくし、完全自動保存にしました ▼
+            st.write(f"※カレンダーをクリックすると**即座に自動保存**され、上の緑色の枠に反映されます。")
+            
+            # 曜日のヘッダー行
+            cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+            
+            # 日付とチェックボックス
+            for week in cal_matrix:
                 cols = st.columns(7)
-                for i, w in enumerate(weekdays_ja):
-                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-                
-                # 日付とチェックボックス
-                for week in cal_matrix:
-                    cols = st.columns(7)
-                    for i, day in enumerate(week):
-                        if day != 0:
-                            date_obj = datetime.date(year, month, day)
-                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            
-                            if is_hol_or_sun:
-                                day_label = f":red[**{day}日**]"
-                            elif is_sat:
-                                day_label = f":blue[**{day}日**]"
-                            else:
-                                day_label = f"**{day}日**"
-                                
-                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                            
-                            with cols[i]:
-                                if st.checkbox(day_label, key=chk_key):
-                                    new_ng_list.append(day)
+                for i, day in enumerate(week):
+                    if day != 0:
+                        date_obj = datetime.date(year, month, day)
+                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                        
+                        if is_hol_or_sun:
+                            day_label = f":red[**{day}日**]"
+                        elif is_sat:
+                            day_label = f":blue[**{day}日**]"
                         else:
-                            with cols[i]:
-                                st.write("")
-                
-                # ▼ 【変更】ボタンの戻り値を取得して保存完了の通知を出します ▼
-                submitted = st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+                            day_label = f"**{day}日**"
+                            
+                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                        
+                        with cols[i]:
+                            # フォームの中ではないので、チェックした瞬間にシステムに保存（反映）されます
+                            st.checkbox(day_label, key=chk_key)
+                    else:
+                        with cols[i]:
+                            st.write("")
             
-            current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
-            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
-            
-            if submitted:
-                st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
+            # 最新の状態を常に staff_df に反映
+            current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
+            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs_str)
 
 st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
