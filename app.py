@@ -69,9 +69,28 @@ month = col_m.number_input("月", min_value=1, max_value=12, value=default_month
 
 st.divider()
 
-# === ▼UI変更：カレンダーをクリックして休日を設定するUI▼ ===
-st.subheader(f"📅 カレンダー確認 兼 特別休日の設定（{month}月）")
+# === ▼UI変更：タイトルの変更とチェックボックスONで赤くなるCSSを追加▼ ===
+st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
 st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
+
+# チェックマークを入れると背景が薄い赤になり、文字も赤くなる魔法のスタイル
+st.markdown("""
+<style>
+div[data-testid="stCheckbox"] {
+    padding: 5px;
+    border-radius: 5px;
+    transition: all 0.2s ease;
+}
+div[data-testid="stCheckbox"]:has(input:checked) {
+    background-color: #ffeeee;
+}
+div[data-testid="stCheckbox"]:has(input:checked) p,
+div[data-testid="stCheckbox"]:has(input:checked) span,
+div[data-testid="stCheckbox"]:has(input:checked) strong {
+    color: #ff4b4b !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
@@ -98,10 +117,10 @@ for week in cal_matrix:
         else:
             with cols[i]:
                 st.write("")
+# =========================================================================
 
 st.divider()
 
-# === ▼UI変更：複数人シフトをドロップダウン表で設定するUI▼ ===
 st.subheader("👥 複数人シフト（増員）の設定")
 st.write("※GWなどで通常1名の枠を「2名以上」に増やしたい場合は、下表に入力してください。（不要な行は選択してDeleteキーで消せます）")
 
