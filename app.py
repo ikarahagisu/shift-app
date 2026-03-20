@@ -273,25 +273,9 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # === 曜日の一括チェックとクリアボタン ===
-            col_text, col_btn = st.columns([5, 1])
-            with col_text:
-                st.write("▼ **曜日の一括チェック**（※下のカレンダーの手動チェックはリセットされます）")
-            with col_btn:
-                if st.button("🗑️ 全クリア", key=f"btn_clear_{doc_name}_{year}_{month}", use_container_width=True):
-                    for d in range(1, num_days + 1):
-                        st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = False
-
-            b_cols = st.columns(7)
-            for i, w in enumerate(weekdays_ja):
-                if b_cols[i].button(f"{w}曜", key=f"btn_w_{doc_name}_{year}_{month}_{i}", use_container_width=True):
-                    for d in range(1, num_days + 1):
-                        if datetime.date(year, month, d).weekday() == i:
-                            st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = True
-            
-            # === フォーム形式のカレンダー（手動ポチポチ中は絶対にリロードされない） ===
+            # === 一括ボタンは完全に削除し、純粋なフォームのみにしました ===
             with st.form(key=f"ng_form_{original_idx}"):
-                st.write(f"※カレンダーで選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
+                st.write(f"※カレンダーで休みたい日をポチポチ選び、最後に必ず**【確定する】**ボタンを押してください。（選んでいる最中は一切読み込みは発生しません！）")
                 
                 new_ng_list = []
                 
@@ -316,9 +300,7 @@ if not valid_staff.empty:
                                 day_label = f"**{day}日**"
                                 
                             chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                            if chk_key not in st.session_state:
-                                st.session_state[chk_key] = False
-                                
+                            
                             with cols[i]:
                                 if st.checkbox(day_label, key=chk_key):
                                     new_ng_list.append(day)
@@ -326,10 +308,8 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
-                # 確定ボタン
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
-            # フォーム内で選択された結果をAIに渡す用のデータに反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 
 st.divider()
