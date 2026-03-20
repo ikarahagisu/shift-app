@@ -36,8 +36,8 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
 
     ### 2. アプリで設定する
     画面上部で、作成したい「年」と「月」を選びます。
-    年末年始やお盆など、カレンダー上は平日でも日直が必要な（休日扱いにする）日がある場合は「特別休日の設定」に入力します。
-    GWなどで特定のシフトを「2名以上」の体制にしたい場合は、「複数人シフトの設定」に増員したい枠を入力してください。
+    年末年始やお盆など、カレンダー上は平日でも日直が必要な（休日扱いにする）日がある場合は、カレンダーのチェックボックスをオンにしてください。
+    特定のシフトを「2名以上」の体制に増員したい場合は、「複数人シフトの設定」の表に追加してください。
 
     ### 3. シフトを自動生成する
     条件を入力し、「🚀 自動生成」ボタンを押します。
@@ -67,44 +67,84 @@ col_y, col_m = st.columns(2)
 year = col_y.number_input("年", min_value=2026, value=default_year, step=1)
 month = col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
 
-st.markdown("##### 特別休日の設定")
-st.write("※カレンダー上は平日でも、休日（日直枠あり）として扱いたい日を入力してください。")
-custom_holidays_str = st.text_input("祝日扱いにする日（半角カンマ区切り。例: 29,30,31）", "")
+st.divider()
 
+# === ▼UI変更：カレンダーをクリックして休日を設定するUI▼ ===
+st.subheader(f"📅 カレンダー確認 兼 特別休日の設定（{month}月）")
+st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
+
+cal_matrix = calendar.monthcalendar(year, month)
+weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
-if custom_holidays_str:
-    try:
-        custom_holidays = [int(x.strip()) for x in custom_holidays_str.split(',') if x.strip().isdigit()]
-    except:
-        st.error("数字と半角カンマで入力してください。")
 
-st.markdown("##### 複数人シフト（増員）の設定")
-st.write("※GWや年末年始など、通常1名の枠を「2名以上」に増やしたい場合に入力してください。")
-multi_slots_str = st.text_input("増員する「日:枠名:人数」（例: 3日:宿直A:2名, 4日:日直B:3名）※カンマ区切り", "")
+cols = st.columns(7)
+for i, w in enumerate(weekdays_ja):
+    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+
+for week in cal_matrix:
+    cols = st.columns(7)
+    for i, day in enumerate(week):
+        if day != 0:
+            date_obj = datetime.date(year, month, day)
+            is_weekend_or_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)
+            
+            with cols[i]:
+                if is_weekend_or_hol:
+                    st.markdown(f"<div style='text-align: center; color: #ff4b4b; background-color: #ffeeee; padding: 5px; border-radius: 5px; margin-bottom: 10px;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
+                else:
+                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
+                        custom_holidays.append(day)
+        else:
+            with cols[i]:
+                st.write("")
+
+st.divider()
+
+# === ▼UI変更：複数人シフトをドロップダウン表で設定するUI▼ ===
+st.subheader("👥 複数人シフト（増員）の設定")
+st.write("※GWなどで通常1名の枠を「2名以上」に増やしたい場合は、下表に入力してください。（不要な行は選択してDeleteキーで消せます）")
+
+_, num_days = calendar.monthrange(year, month)
+NIGHT_SHIFTS_UI = ['宿直A', '宿直B', '外来宿直']
+DAY_SHIFTS_UI = ['日直A', '日直B', '外来日直']
+
+date_options = [f"{d}日" for d in range(1, num_days + 1)]
+shift_options = NIGHT_SHIFTS_UI + DAY_SHIFTS_UI
+
+multi_df_template = pd.DataFrame(columns=["日付", "シフト枠", "人数"])
+edited_multi_df = st.data_editor(
+    multi_df_template,
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    height=150,
+    column_config={
+        "日付": st.column_config.SelectboxColumn("日付を選択", options=date_options, required=True),
+        "シフト枠": st.column_config.SelectboxColumn("増員する枠を選択", options=shift_options, required=True),
+        "人数": st.column_config.NumberColumn("人数を指定", min_value=2, max_value=10, step=1, required=True)
+    }
+)
 
 multi_slots_dict = {}
-if multi_slots_str:
-    for item in multi_slots_str.split(','):
-        parts = item.strip().split(':')
-        if len(parts) == 3:
-            try:
-                d_val = int(re.sub(r'\D', '', parts[0]))
-                s_val = parts[1].strip()
-                c_val = int(re.sub(r'\D', '', parts[2]))
-                multi_slots_dict[(d_val, s_val)] = c_val
-            except:
-                pass
+for _, row in edited_multi_df.iterrows():
+    d_str = str(row.get("日付", ""))
+    s_val = str(row.get("シフト枠", ""))
+    c_val = row.get("人数")
+    
+    if d_str and s_val and pd.notna(c_val):
+        try:
+            d_val = int(re.sub(r'\D', '', d_str))
+            c_val = int(c_val)
+            multi_slots_dict[(d_val, s_val)] = c_val
+        except:
+            pass
 
 st.divider()
 
 # ==========================================
-# 2. 枠数とカレンダー表示
+# 2. 枠数とカレンダー表示（計算・集計）
 # ==========================================
-_, num_days = calendar.monthrange(year, month)
-
-NIGHT_SHIFTS_UI = ['宿直A', '宿直B', '外来宿直']
-DAY_SHIFTS_UI = ['日直A', '日直B', '外来日直']
-
 total_night_slots = 0
 total_day_slots = 0
 for d in range(1, num_days + 1):
@@ -126,30 +166,6 @@ col1.metric("🌙 宿直枠 (A・B・外来)", f"計 {total_night_slots} 枠")
 col2.metric("☀️ 日直枠 (A・B・外来)", f"計 {total_day_slots} 枠")
 col3.metric("🏥 月間 総シフト数", f"合計 {total_slots} 枠")
 
-st.subheader(f"📅 カレンダー確認（{month}月）")
-
-cal_matrix = calendar.monthcalendar(year, month)
-df_cal = pd.DataFrame(cal_matrix, columns=["月", "火", "水", "木", "金", "土", "日"])
-df_cal = df_cal.astype(str).replace("0", "")
-
-def color_calendar(val):
-    if val == "":
-        return ""
-    d = int(val)
-    date_obj = datetime.date(year, month, d)
-    if date_obj.weekday() == 6 or jpholiday.is_holiday(date_obj) or (d in custom_holidays):
-        return "color: #ff4b4b; font-weight: bold; background-color: #ffeeee;"
-    elif date_obj.weekday() == 5:
-        return "color: #1e90ff; font-weight: bold; background-color: #eef5ff;"
-    return ""
-
-if hasattr(df_cal.style, "map"):
-    styled_cal = df_cal.style.map(color_calendar)
-else:
-    styled_cal = df_cal.style.applymap(color_calendar)
-
-cal_height = len(df_cal) * 35 + 40
-st.dataframe(styled_cal, use_container_width=True, hide_index=True, height=cal_height)
 st.divider()
 
 # ==========================================
@@ -200,6 +216,7 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
+st.write("※以下の表は**直接クリックして文字を入力**できます。")
 edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
 
 staff_df = edited_df.reset_index()
@@ -249,6 +266,7 @@ if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
+st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
 edited_fixed_df = edited_fixed_df_raw.reset_index()
@@ -406,9 +424,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             absolute_req_days[doc].extend([d for d in req_days[doc] if 1 <= d <= num_days])
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
             
-        # === ▼修正：決定済みシフトも含めて、確定日はNG日設定を自動解除してエラーを防ぐ▼ ===
-        all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
-        ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
+            all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
+            ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
 
     for d in range(1, num_days + 1):
         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -444,7 +461,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             req_count = multi_slots_dict.get((d, s), 1)
             model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == req_count)
 
-    # 1日1シフトの絶対制約（意図的に1日複数回固定指定している場合は許容）
     for doc in doctors:
         for d in range(1, num_days + 1):
             active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -493,16 +509,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             model.Add(sum(worked_all) <= actual_max_total)
             model.Add(sum(worked_all) >= actual_min_total)
 
-    # === ▼修正：間隔ルールを「サボらない」ペアチェック方式に変更▼ ===
     for doc in doctors:
         interval = min_intervals[doc]
         if interval > 0:
             all_abs_dates = set(absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]])
             
-            # 1. 過去・未来の決定済みシフトとの間隔チェック
             for d in range(1, num_days + 1):
                 if d in all_abs_dates:
-                    continue # 人間が固定した日は許容する
+                    continue
                 
                 current_date = datetime.date(target_year, target_month, d)
                 active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -517,10 +531,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         for s in active_shifts:
                             model.Add(shifts[(d, doc, s)] == 0)
             
-            # 2. 同月内の間隔チェック（指定日とそれ以外の日を厳密にペアでチェック）
             for d1 in range(1, num_days + 1):
                 for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
-                    # ユーザーが両日とも手動で固定している場合はエラーを避けるためにスルー
                     if d1 in all_abs_dates and d2 in all_abs_dates:
                         continue
                         
@@ -530,7 +542,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     for s1 in active_shifts_d1:
                         for s2 in active_shifts_d2:
                             model.Add(shifts[(d1, doc, s1)] + shifts[(d2, doc, s2)] <= 1)
-    # ================================================================
 
     holiday_worked = {}
     for doc in doctors:
