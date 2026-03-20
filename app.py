@@ -41,7 +41,6 @@ def set_all_ng(doc_name, y, m, ndays, val):
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
 
-# ▼ 説明書をさらに詳しくアップデート！ ▼
 with st.expander("📖 初めての方へ：このアプリの特徴と使い方（クリックして開く）", expanded=False):
     st.markdown("""
     このアプリは、各先生の希望や複雑な勤務ルールを考慮し、AIが自動で最適な当直・日直シフトを作成するシステムです。
@@ -53,7 +52,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 
     ### 🧠 AIがシフトを組むときのルール
     AIは以下のルールを守りながら、何万通りもの組み合わせの中から最適なパズルを解き明かします。
-    * **【絶対に守るルール】**: 「NG日には入れない」「最低空ける日数を守る（連投禁止）」「月間の最小・最大回数、各枠の上限回数を守る」「優先度100以上の絶対希望日は確実に通す」。
+    * **【絶対に守るルール】**: 「NG日には入れない」「最低空ける日数を守る（連投禁止）」「月間の最小・最大回数、休日最大回数、各枠の上限回数を守る」「優先度100以上の絶対希望日は確実に通す」。
     * **【なるべく叶えるルール】**: 「土日祝日の勤務回数が一部の人に偏らないよう、全体で公平に分担する（最優先）」「優先度付きの希望日を可能な限り多く通す」。
 
     ---
@@ -71,7 +70,8 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
     * **【希望優先度】** 希望を通す「強さ」です。基本は `1` です。どうしても外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して**【確実】**にそのシフトに入ります。
-    * **【各種ルール】** 「最低空ける日数（シフト間隔）」「月間最小/最大回数」「各シフト枠の上限」を人ごとに設定できます。
+    * **【休日最大回数】** 土日祝日（特別休日含む）に入るシフトの上限回数です。人ごとに休日の負担をコントロールできます。
+    * **【各種ルール】** 他にも「最低空ける日数（シフト間隔）」「月間最小/最大回数」「各シフト枠の上限」を設定できます。
 
     #### 3. 過去・決定済みシフトの入力（任意）
     先月分のシフト表や、今月の「一部だけ確定させたシフト」があれば入力します。
@@ -289,7 +289,8 @@ template_data = {
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
     "月間最小回数": [1, 2, 0, 1, 0],
-    "月間最大回数": [5, 6, 4, 5, 7],    
+    "月間最大回数": [5, 6, 4, 5, 7],
+    "休日最大回数": [2, 2, 2, 2, 2],    
     "宿直A上限": [2, 2, 2, 2, 2],
     "宿直B上限": [2, 2, 2, 2, 2],
     "外来宿直上限": [2, 2, 2, 2, 2],
@@ -506,6 +507,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     min_intervals = {}
     min_shifts_total = {}
     max_shifts_total = {}
+    max_hol_shifts_per_doc = {}
     max_shifts_per_type = {}
     
     absolute_req_days = {doc: [] for doc in doctors}
@@ -600,6 +602,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
 
         max_shifts_per_type[doc] = {
             '宿直A': safe_int(row.get('宿直A上限'), 2),
@@ -757,6 +760,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     hol_shifts.append(shifts[(d, doc, s)])
         holiday_worked[doc] = sum(hol_shifts)
         
+        abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
+        abs_hol_count += sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
+        actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count) 
+        model.Add(holiday_worked[doc] <= actual_hol_max)
+        
     global_max = max(max_shifts_total.values()) if max_shifts_total else 15
     max_hol_shifts = model.NewIntVar(0, global_max, 'max_hol_shifts')
     for doc in doctors:
@@ -780,7 +788,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         objective_terms.append(shifts[(d, doc, s_name)] * weight)
                     
     if objective_terms:
-        # ▼ 修正：max_hol_shifts のペナルティウェイトを 10 から 1000 に爆上げし、休日の公平化を最優先にしました！ ▼
         model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
     else:
         model.Minimize(max_hol_shifts)
@@ -849,6 +856,15 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
         if theoretical_min_total > req_all_slots:
             reasons.append(f"❌ **最小回数の設定オーバー**: 先生全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
+
+        req_hol_total = 0
+        for d in range(1, num_days + 1):
+            if is_holiday(target_year, target_month, d):
+                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS
+                req_hol_total += sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
+        max_hol_available = sum(max_hol_shifts_per_doc[doc] for doc in doctors)
+        if max_hol_available < req_hol_total:
+            reasons.append(f"❌ **休日シフト枠の不足**: 月間に必要な休日の総枠数({req_hol_total}枠)に対して、先生全員の「休日最大回数」の合計({max_hol_available}回分)が足りていません。各人の休日最大回数を増やしてください。")
 
         if not reasons:
             reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、人ごとの「最低空ける日数」や「最大回数」ルールの連鎖によってどこかの日程でパズルが破綻しています。条件の厳しい先生の設定を緩めてみてください。")
