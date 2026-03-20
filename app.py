@@ -65,7 +65,10 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 
     #### 2. スタッフ条件の読み込み・入力（必須）
     まずは「📥 ひな形（CSV）」をダウンロードしてExcelで基本情報を入力し、アップロードするのがおすすめです。もちろん、画面上の表を直接クリックして編集することも可能です。
-    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日をポチポチ選んで、最後に**【確定する】**を押します。
+    
+    💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
+
+    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に**【確定する】**を押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
@@ -284,8 +287,10 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
+# ▼ 修正：ひな形に「NG日」列を追加し、注意喚起メッセージを入れました ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
+    "NG日(半角カンマ区切り)": ["(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)", "", "", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
@@ -384,16 +389,16 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **保存済みのNG日はありません**")
 
-            st.write("▼ **一括操作**")
-            col_btn1, col_btn2, _ = st.columns([2, 2, 6])
+            # ▼ 修正：一括操作ボタンを補助的に小さく目立たなくしました ▼
+            st.markdown("<span style='font-size: 0.8rem; color: #666;'>▼ 補助機能（一括操作）</span>", unsafe_allow_html=True)
+            col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 7])
             with col_btn1:
-                st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
+                st.button("全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True))
             with col_btn2:
-                st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
+                st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False))
 
-            # ▼ 修正：フォームを復活させて、まとめて保存する仕様に変更しました ▼
             with st.form(key=f"ng_form_{original_idx}", border=False):
-                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の**【確定する】**ボタンを押して保存してください。")
+                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の青い**【確定する】**ボタンを押して保存してください。")
                 
                 # 曜日のヘッダー行
                 cols = st.columns(7)
@@ -425,7 +430,8 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
-                submitted = st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+                # ▼ 修正：メインアクションである「確定」を青色ボタン（primary）に変更しました ▼
+                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を確定する", type="primary")
             
             # 最新の状態を常に staff_df に反映
             current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
@@ -434,7 +440,9 @@ if not valid_staff.empty:
             if submitted:
                 st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
 
-st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
+st.divider()
+# ▼ 修正：デザインを変え、タイトルも「一時保存」であることを強調しました ▼
+st.markdown("##### 📂 入力途中のデータを一時保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
 
 current_csv = staff_df.to_csv(index=False).encode('shift_jis')
