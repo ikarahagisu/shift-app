@@ -182,10 +182,9 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    # ▼ 修正：変な背景色をなくし、文字だけを赤くしてスッキリさせました ▼
-                    st.markdown(f"<div style='color: #ff4b4b; text-align: center; white-space: nowrap; line-height: 1.2;'><b>{day}日</b><br><span style='font-size: 0.8em;'>休</span></div>", unsafe_allow_html=True)
+                    # ▼ 修正：「休」のブロックにチェックボックスと全く同じ高さ(1.25rem)を持たせ、高さをピタッと揃えました ▼
+                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #ff4b4b; line-height: 1;'><b style='margin: 0; padding: 0;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
                 else:
-                    # ▼ 修正：help="..." を消して「？」マークを出さないようにしました ▼
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
         else:
