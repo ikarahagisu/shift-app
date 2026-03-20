@@ -84,6 +84,9 @@ st.markdown("""
 /* 7列のブロック（カレンダーのヘッダーと日付部分）の隙間をなくして密着させる */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     gap: 0 !important;
+    flex-wrap: nowrap !important;       /* ←追加：スマホでも縦積みにしない */
+    flex-direction: row !important;     /* ←追加：スマホでも横並びを維持 */
+    overflow-x: auto !important;        /* ←追加：画面に収まらない場合は横スクロール */
 }
 
 /* カレンダーの各マス（セル）に枠線をつけ、中身を完全な中央揃えにする */
@@ -97,6 +100,8 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     padding: 5px 0 !important;
     background-color: #ffffff;
     min-height: 55px; /* マスの高さを一定に保つ */
+    width: 14.28% !important;           /* ←追加：7列を均等幅に維持 */
+    min-width: 45px !important;         /* ←追加：スマホで潰れすぎないように最低幅を確保 */
 }
 
 /* チェックボックス自体とテキストをセルの中央に配置 */
