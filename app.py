@@ -1,3 +1,17 @@
+CSVから読み込んだNG日がうまく反映されないことがあったとのこと、ご不便をおかけして申し訳ありません！
+原因を調べたところ、Excelなどで入力された数字（例：「5」が裏側で「5.0」として読み込まれるなど）の読み取り処理が少し厳格すぎたため、カレンダー側にうまく連携されないケースがあったようです。
+
+ご要望の通り、**スタッフ条件の表の「NG日」列を非表示にせず、CSVと同じようにそのまま表示する**ように戻しました！
+さらに、数字の読み取り処理も強化しています。
+
+**【今の仕様（とても便利です！）】**
+* 表の「NG日」列に直接数字をカンマ区切りで手入力してもOK！
+* 下のカレンダーをポチポチとクリックして設定してもOK！
+（どちらで入力しても、最終的にAIはきちんと両方を統合して計算してくれます）
+
+お手数ですが、メモ帳のコードを **`Ctrl` + `A`** で全選択して消し、以下の最新コードに丸ごと上書き保存してください。
+
+```python
 import streamlit as st
 import pandas as pd
 import datetime
@@ -26,7 +40,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 表の下にあるカレンダーから、先生ごとにタブを切り替えてNG日をポチポチとクリックして直感的に選べます。（CSVから読み込んだ場合も自動反映されます）
+    * **【NG日】** 表の「NG日」列に半角数字で直接入力するか、表の下にあるカレンダーからポチポチとクリックして直感的に選べます。
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -89,6 +103,7 @@ div[data-testid="stCheckbox"]:has(input:checked) strong {
 </style>
 """, unsafe_allow_html=True)
 
+# 月曜始まりのカレンダー（calendar.monthcalendarはデフォルトで月曜始まりです）
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
@@ -231,23 +246,20 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表の下のカレンダーで設定します）")
+st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表、または下のカレンダーどちらからでも設定可能です）")
 
+# === ▼UI変更：NG日の列を再び表示するように戻しました▼ ===
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
     use_container_width=True, 
-    height=300,
-    column_config={
-        "NG日(半角カンマ区切り)": None 
-    }
+    height=300
 )
 
 staff_df = edited_df.reset_index()
 
-# === ▼NGカレンダーの土日・祝日・特別休日の色付け対応▼ ===
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。上の表の「NG日」列にも反映されます。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -257,12 +269,17 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
+            # === ▼修正：Excelの数字の読み取り処理をより柔軟に強化（5.0などにも対応）▼ ===
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_list = []
             if current_ng_str and current_ng_str.strip() != "" and current_ng_str != "nan":
                 for x in current_ng_str.split(','):
-                    if x.strip().isdigit():
-                        current_ng_list.append(int(x.strip()))
+                    try:
+                        val = int(float(x.strip()))
+                        if 1 <= val <= num_days:
+                            current_ng_list.append(val)
+                    except:
+                        pass
             
             new_ng_list = []
             
@@ -277,12 +294,10 @@ if not valid_staff.empty:
                     if day != 0:
                         is_checked = day in current_ng_list
                         
-                        # 休日や土日の判定
                         date_obj = datetime.date(year, month, day)
                         is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                         is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                         
-                        # 曜日に合わせてテキストの色を変更する
                         if is_hol_or_sun:
                             day_label = f":red[**{day}日**]"
                         elif is_sat:
@@ -881,3 +896,4 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
             st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
 elif len(staff_df) == 0:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
+```
