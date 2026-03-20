@@ -9,6 +9,21 @@ import re
 from ortools.sat.python import cp_model
 import jpholiday
 
+# ==========================================
+# カレンダー一括操作用の裏側ロジック（おまじない）
+# ==========================================
+def toggle_weekday(doc_name, y, m, target_w, ndays):
+    for d in range(1, ndays + 1):
+        # 指定された曜日と同じ日付のチェックをオンにする
+        if datetime.date(y, m, d).weekday() == target_w:
+            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
+
+def clear_ng(doc_name, y, m, ndays):
+    # 全ての日付のチェックをオフにする
+    for d in range(1, ndays + 1):
+        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = False
+
+
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -26,7 +41,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※選んだあとは必ず「確定する」ボタンを押してください）
+    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※一括選択ボタンを使うとさらに便利です！）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -245,7 +260,6 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 staff_df["NG日(半角カンマ区切り)"] = ""
 
-# === ▼UI変更：NGカレンダーを「一括保存（フォーム）モード」に変更▼ ===
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
@@ -257,7 +271,37 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # フォーム（一括保存機能）を開始
+            
+            # --- 初期値の読み込み ---
+            current_ng_list = []
+            
+            # セッションステートの初期化（まだ値がない場合のみ空のリストとして準備）
+            for d in range(1, num_days + 1):
+                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = False
+
+            # === ▼追加：一括選択・クリアボタンのUI▼ ===
+            st.write("▼ **曜日の一括チェック / 全クリア**（※保存前の手動チェックはリセットされます）")
+            b_cols = st.columns([1,1,1,1,1,1,1, 1.5])
+            for i, w in enumerate(weekdays_ja):
+                b_cols[i].button(
+                    f"{w}曜", 
+                    key=f"btn_w_{doc_name}_{year}_{month}_{i}", 
+                    on_click=toggle_weekday, 
+                    args=(doc_name, year, month, i, num_days),
+                    use_container_width=True
+                )
+            
+            b_cols[7].button(
+                "🗑️ クリア", 
+                key=f"btn_clear_{doc_name}_{year}_{month}", 
+                on_click=clear_ng, 
+                args=(doc_name, year, month, num_days),
+                use_container_width=True
+            )
+            # ==========================================
+
             with st.form(key=f"ng_form_{original_idx}"):
                 st.write(f"※ポチポチと選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
                 
@@ -286,17 +330,15 @@ if not valid_staff.empty:
                             chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                             
                             with cols[i]:
-                                # フォーム内でチェックボックスを表示
                                 if st.checkbox(day_label, key=chk_key):
                                     new_ng_list.append(day)
                         else:
                             with cols[i]:
                                 st.write("")
                 
-                # 送信（確定）ボタン
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
-            # フォーム内で選択された結果をAIに渡す用のデータに反映
+            # データフレームへの反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
