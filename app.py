@@ -101,37 +101,6 @@ st.divider()
 st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
 st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
 
-# === ▼カイゼン：黄色背景を削除し、チェックマークを「✖」に変更するCSS▼ ===
-st.markdown("""
-<style>
-div[data-testid="stCheckbox"] {
-    padding: 5px;
-    border-radius: 5px;
-}
-/* チェックボックス自体の背景を赤にし、枠線を消す */
-div[data-testid="stCheckbox"] label input:checked + div {
-    background-color: #ff4b4b !important;
-    border-color: #ff4b4b !important;
-}
-/* デフォルトのチェックマーク（SVG）を非表示にする */
-div[data-testid="stCheckbox"] label input:checked + div svg {
-    display: none !important;
-}
-/* 代わりに「✖」マークをCSSで強引に表示させる */
-div[data-testid="stCheckbox"] label input:checked + div::before {
-    content: "✖";
-    color: white;
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 11px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
-# =======================================================================
-
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
@@ -346,6 +315,7 @@ if not valid_staff.empty:
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
+                            # ▼ 余計な細工をせず、文字色だけを反映（チェック後も色は保持されます！）
                             if is_hol_or_sun:
                                 day_label = f":red[**{day}日**]"
                             elif is_sat:
