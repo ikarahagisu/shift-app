@@ -26,7 +26,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※ミス防止のため、CSVや表への直接入力は廃止しました）
+    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※選んだあとは必ず「確定する」ボタンを押してください）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -188,7 +188,6 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
-# === ▼修正：ひな形から「NG日」の列を削除しました▼ ===
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
@@ -225,7 +224,6 @@ if uploaded_file is not None:
     except UnicodeDecodeError:
         base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='utf-8')
         
-    # === ▼修正：古いCSVがアップロードされても、NG日の列は自動で削除（無視）する▼ ===
     if "NG日(半角カンマ区切り)" in base_df.columns:
         base_df = base_df.drop(columns=["NG日(半角カンマ区切り)"])
 else:
@@ -245,10 +243,9 @@ edited_df = st.data_editor(
 )
 
 staff_df = edited_df.reset_index()
-
-# === ▼修正：カレンダー入力の結果を裏で保存する列を作成▼ ===
 staff_df["NG日(半角カンマ区切り)"] = ""
 
+# === ▼UI変更：NGカレンダーを「一括保存（フォーム）モード」に変更▼ ===
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
@@ -260,38 +257,46 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            new_ng_list = []
-            
-            cols = st.columns(7)
-            for i, w in enumerate(weekdays_ja):
-                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-            
-            for week in cal_matrix:
+            # フォーム（一括保存機能）を開始
+            with st.form(key=f"ng_form_{original_idx}"):
+                st.write(f"※ポチポチと選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
+                
+                new_ng_list = []
+                
                 cols = st.columns(7)
-                for i, day in enumerate(week):
-                    if day != 0:
-                        date_obj = datetime.date(year, month, day)
-                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                        
-                        if is_hol_or_sun:
-                            day_label = f":red[**{day}日**]"
-                        elif is_sat:
-                            day_label = f":blue[**{day}日**]"
-                        else:
-                            day_label = f"**{day}日**"
+                for i, w in enumerate(weekdays_ja):
+                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+                
+                for week in cal_matrix:
+                    cols = st.columns(7)
+                    for i, day in enumerate(week):
+                        if day != 0:
+                            date_obj = datetime.date(year, month, day)
+                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
-                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                        
-                        with cols[i]:
-                            # Streamlitの機能でチェック状態は自動的に保持されます
-                            if st.checkbox(day_label, key=chk_key):
-                                new_ng_list.append(day)
-                    else:
-                        with cols[i]:
-                            st.write("")
+                            if is_hol_or_sun:
+                                day_label = f":red[**{day}日**]"
+                            elif is_sat:
+                                day_label = f":blue[**{day}日**]"
+                            else:
+                                day_label = f"**{day}日**"
+                                
+                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                            
+                            with cols[i]:
+                                # フォーム内でチェックボックスを表示
+                                if st.checkbox(day_label, key=chk_key):
+                                    new_ng_list.append(day)
+                        else:
+                            with cols[i]:
+                                st.write("")
+                
+                # 送信（確定）ボタン
+                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
+            # フォーム内で選択された結果をAIに渡す用のデータに反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
