@@ -26,7 +26,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入れない日を半角数字で入力します。（例: `5,12,20`）
+    * **【NG日】** 表の下にある専用の入力欄から、日付をポチポチとクリックして直感的に選べます。（CSVから読み込んだ場合も自動反映されます）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -231,9 +231,64 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-edited_df = st.data_editor(base_df, num_rows="dynamic", use_container_width=True, height=300)
+st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表の下の専用欄で設定します）")
+
+# === ▼UI変更：データエディタで「NG日」列を非表示にする▼ ===
+edited_df = st.data_editor(
+    base_df, 
+    num_rows="dynamic", 
+    use_container_width=True, 
+    height=300,
+    column_config={
+        "NG日(半角カンマ区切り)": None # 表上では非表示にする（データとしては保持される）
+    }
+)
 
 staff_df = edited_df.reset_index()
+
+# === ▼UI変更：NG日をクリックで選べるマルチセレクトUIを追加▼ ===
+st.markdown("##### 🚫 先生ごとのNG日設定（クリックで選択）")
+st.write("※日付の枠をクリックして、ポチポチとNG日を選べます。")
+
+ng_days_selections = {}
+cols = st.columns(4) # 4列に分けてコンパクトに表示
+col_idx = 0
+
+for idx, row in staff_df.iterrows():
+    doc_name = str(row["先生の名前"]).strip()
+    if not doc_name or doc_name == "nan":
+        continue
+        
+    # CSVや初期データから入っているNG日を読み取ってデフォルト値にする
+    existing_ng_str = str(row.get("NG日(半角カンマ区切り)", ""))
+    default_ng = []
+    if existing_ng_str and existing_ng_str.strip() != "" and existing_ng_str != "nan":
+        for x in existing_ng_str.split(','):
+            try:
+                val = int(x.strip())
+                # カレンダーの末日以内の数字だけ有効にする
+                if 1 <= val <= num_days:
+                    default_ng.append(val)
+            except:
+                pass
+    
+    default_ng = list(dict.fromkeys(default_ng)) # 重複排除
+    
+    with cols[col_idx % 4]:
+        selected = st.multiselect(
+            f"🩺 {doc_name}",
+            options=list(range(1, num_days + 1)),
+            default=default_ng,
+            format_func=lambda x: f"{x}日",
+            key=f"ng_multi_{idx}"
+        )
+        ng_days_selections[idx] = selected
+    col_idx += 1
+
+# 選ばれたNG日を、計算用のデータフレームにカンマ区切りで戻してあげる
+for idx, row in staff_df.iterrows():
+    if idx in ng_days_selections:
+        staff_df.at[idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, ng_days_selections[idx]))
 
 st.divider()
 
