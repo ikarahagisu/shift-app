@@ -233,7 +233,6 @@ if "先生の名前" in base_df.columns:
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表の下のカレンダーで設定します）")
 
-# NG日の列を表上では非表示にする（データとしては裏で保持する）
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
@@ -246,11 +245,10 @@ edited_df = st.data_editor(
 
 staff_df = edited_df.reset_index()
 
-# === ▼UI大改修：NG日をカレンダーでポチポチ選べる専用UI▼ ===
+# === ▼NGカレンダーの土日・祝日・特別休日の色付け対応▼ ===
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
-# 空白の名前を除外
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
@@ -259,7 +257,6 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # 現在のNG日を読み取る（CSVからの初期値もここで拾う）
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_list = []
             if current_ng_str and current_ng_str.strip() != "" and current_ng_str != "nan":
@@ -269,27 +266,37 @@ if not valid_staff.empty:
             
             new_ng_list = []
             
-            # カレンダーのヘッダー描画
             cols = st.columns(7)
             for i, w in enumerate(weekdays_ja):
                 color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                 cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
             
-            # カレンダーの日付（チェックボックス）描画
             for week in cal_matrix:
                 cols = st.columns(7)
                 for i, day in enumerate(week):
                     if day != 0:
                         is_checked = day in current_ng_list
+                        
+                        # 休日や土日の判定
+                        date_obj = datetime.date(year, month, day)
+                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                        
+                        # 曜日に合わせてテキストの色を変更する
+                        if is_hol_or_sun:
+                            day_label = f":red[**{day}日**]"
+                        elif is_sat:
+                            day_label = f":blue[**{day}日**]"
+                        else:
+                            day_label = f"**{day}日**"
+                            
                         with cols[i]:
-                            # チェックを入れると、上に書いたCSSのおかげで赤くなる
-                            if st.checkbox(f"**{day}日**", value=is_checked, key=f"ng_{original_idx}_{day}"):
+                            if st.checkbox(day_label, value=is_checked, key=f"ng_{original_idx}_{day}"):
                                 new_ng_list.append(day)
                     else:
                         with cols[i]:
                             st.write("")
             
-            # 選ばれたチェックボックスの内容をカンマ区切りの文字列に戻して、元のデータフレームに上書き
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
