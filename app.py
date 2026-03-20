@@ -85,7 +85,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     gap: 2px !important;
-    width: 100% !important; /* ←【追加】親の枠線（フォーム等）からはみ出さない！ */
+    width: 100% !important; 
     box-sizing: border-box !important;
 }
 
@@ -93,7 +93,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
     min-width: 0 !important; /* スマホで綺麗に縮むようにする */
-    box-sizing: border-box !important; /* ←【追加】枠線分も含めて幅を計算させる */
+    box-sizing: border-box !important; 
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 5px 0px !important;
@@ -125,7 +125,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
 /* チェックボックスのヘルプアイコン（?）等で余計な余白ができないように調整 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
     padding-right: 0 !important;
-    gap: 4px !important; /* ←【追加】チェックの四角と文字の隙間を詰めて幅を節約 */
+    gap: 4px !important; /* チェックの四角と文字の隙間を詰めて幅を節約 */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -351,7 +351,8 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
-            with st.form(key=f"ng_form_{original_idx}"):
+            # ▼ 修正ポイント：border=False を追加して枠線を消しました！ ▼
+            with st.form(key=f"ng_form_{original_idx}", border=False):
                 st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
                 
                 new_ng_list = []
