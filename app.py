@@ -18,7 +18,6 @@ def parse_staff_csv(file_bytes):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
-    # ▼修正：ここでNG日を削除してしまう処理を撤廃し、しっかり読み込むようにしました！
     return df
 
 @st.cache_data
@@ -34,9 +33,11 @@ def parse_fixed_csv(file_bytes):
 # ==========================================
 # カレンダー一括操作用の裏側ロジック
 # ==========================================
-def set_all_ng(doc_name, y, m, ndays, val):
-    for d in range(1, ndays + 1):
-        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = val
+def select_all_ng(key, ndays):
+    st.session_state[key] = list(range(1, ndays + 1))
+
+def clear_all_ng(key):
+    st.session_state[key] = []
 
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
@@ -48,19 +49,19 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
 
     ### 1. カレンダーと特別設定（画面上部）
     * **年月の設定**: 作成したいシフトの年と月を選択します。
-    * **特別休日の設定**: 平日でも日直が必要な日（年末年始など）は、カレンダーのチェックボックスをオンにして「休日扱い」にします。
+    * **特別休日の設定**: 平日でも日直が必要な日（年末年始など）は、リストから日付を選んで「休日扱い」にします。
     * **複数人シフト（増員）の設定**: GWなどで特定のシフトを「2名以上」に増やしたい場合は、表で日付と枠を指定して人数を変更します。
 
     ### 2. スタッフ条件の読み込み・入力（必須）
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※選び終わったら必ず「確定する」ボタンを押してください！）
+    * **【NG日】** 入力表の下にあるタブから先生を選び、休みたい日をリストから選択してください。
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
     * **【希望優先度】** 希望を通すための「相対的な強さ」です。基本は `1` です。
-        * 例：Dr. Aを `10`、Dr. Bを `1` にして同じ日を希望して競合した場合、AIはDr. Aの希望を優先的に叶えます（※ただし間隔などのルール範囲内）。
+        * 例：Dr. Aを `10`、Dr. Bを `1` にして同じ日を希望して競合した場合、AIはDr. Aの希望を優先的に叶えます。
         * **特例（絶対希望）**：ここを `100` 以上にすると、間隔ルールや上限回数をすべて無視して【確実】にそのシフトに入ります。
     * **【最低空ける日数】** シフトとシフトの間を最低何日空けるかです。（人ごとに設定できます）
     * **【月間最小回数】** その月に入るシフトの「最低保証」回数です。（未入力や空欄の場合は0回扱いになります）
@@ -77,64 +78,6 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     設定と入力が終わったら、一番下の「🚀 このデータでシフトを自動生成する」ボタンを押します。
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。完成した表はCSVでダウンロードできます。
     """)
-
-# === 上部・下部カレンダー共通の「格子状・中央揃えデザイン」CSS ===
-st.markdown("""
-<style>
-/* 7列のブロック（カレンダーのヘッダーと日付部分）の隙間をなくして密着させる */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
-    gap: 0 !important;
-    flex-wrap: nowrap !important;       /* ←追加：スマホでも縦積みにしない */
-    flex-direction: row !important;     /* ←追加：スマホでも横並びを維持 */
-    overflow-x: auto !important;        /* ←追加：画面に収まらない場合は横スクロール */
-}
-
-/* カレンダーの各マス（セル）に枠線をつけ、中身を完全な中央揃えにする */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
-    border: 1px solid #b0b0b0; /* はっきりとした枠線 */
-    margin-right: -1px; /* 枠線の二重描画を防ぐ */
-    margin-bottom: -1px; /* 枠線の二重描画を防ぐ */
-    display: flex;
-    justify-content: center; /* 左右中央揃え */
-    align-items: center; /* 上下中央揃え */
-    padding: 5px 0 !important;
-    background-color: #ffffff;
-    min-height: 55px; /* マスの高さを一定に保つ */
-    width: 14.28% !important;           /* ←追加：7列を均等幅に維持 */
-    min-width: 45px !important;         /* ←追加：スマホで潰れすぎないように最低幅を確保 */
-}
-
-/* チェックボックス自体とテキストをセルの中央に配置 */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    margin: 0 !important;
-}
-
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
-    display: flex;
-    justify-content: center !important;
-    align-items: center;
-    width: 100%;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-/* 「月」「火」などの曜日テキストや、チェックボックスの無い文字を中央に配置 */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    text-align: center;
-}
-</style>
-""", unsafe_allow_html=True)
-# ==============================================================================
 
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
@@ -153,43 +96,33 @@ col_y, col_m = st.columns(2)
 year = col_y.number_input("年", min_value=2026, value=default_year, step=1)
 month = col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
 
+_, num_days = calendar.monthrange(year, month)
+weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
+
 st.divider()
 
-st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
-st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
+st.subheader(f"📅 特別休日の設定 - {month}月")
+st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、下の枠から日付を選んでください。")
 
-cal_matrix = calendar.monthcalendar(year, month)
-weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
-custom_holidays = []
+# 平日のリストを作成
+normal_weekdays = []
+for d in range(1, num_days + 1):
+    date_obj = datetime.date(year, month, d)
+    if not (date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)):
+        normal_weekdays.append(d)
 
-cols = st.columns(7)
-for i, w in enumerate(weekdays_ja):
-    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-
-for week in cal_matrix:
-    cols = st.columns(7)
-    for i, day in enumerate(week):
-        if day != 0:
-            date_obj = datetime.date(year, month, day)
-            is_weekend_or_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)
-            
-            with cols[i]:
-                if is_weekend_or_hol:
-                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; padding: 5px 0;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
-                else:
-                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
-                        custom_holidays.append(day)
-        else:
-            with cols[i]:
-                st.write("")
+custom_holidays = st.multiselect(
+    "休日扱いにする平日を選択",
+    options=normal_weekdays,
+    format_func=lambda x: f"{x}日 ({weekdays_ja[datetime.date(year, month, x).weekday()]})",
+    help="選択した平日は、土日と同じように「日直」の枠が計算されます。"
+)
 
 st.divider()
 
 st.subheader("👥 複数人シフト（増員）の設定")
 st.write("※GWなどで通常1名の枠を「2名以上」に増やしたい場合は、下表に入力してください。（不要な行は選択してDeleteキーで消せます）")
 
-_, num_days = calendar.monthrange(year, month)
 NIGHT_SHIFTS_UI = ['宿直A', '宿直B', '外来宿直']
 DAY_SHIFTS_UI = ['日直A', '日直B', '外来日直']
 
@@ -288,10 +221,10 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
-    # ▼修正：ファイルの中身（ID）が変わった時だけリセットするようにし、確実性をアップしました
     if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
         for key in list(st.session_state.keys()):
-            if key.startswith("ng_"):
+            # 修正: マルチセレクト用のsession_stateもリセットする
+            if key.startswith("ms_ng_") or key.startswith("ng_"):
                 del st.session_state[key]
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
@@ -320,7 +253,7 @@ edited_df = st.data_editor(
 
 staff_df = edited_df.reset_index()
 
-st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
+st.markdown("##### 🚫 先生ごとのNG日設定")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -330,7 +263,7 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            
+            # 現在のNG日リストを取得
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
             current_ng_list = []
@@ -343,56 +276,31 @@ if not valid_staff.empty:
                     except:
                         pass
             
-            for d in range(1, num_days + 1):
-                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
-                if chk_key not in st.session_state:
-                    st.session_state[chk_key] = (d in current_ng_list)
+            # マルチセレクト用の状態管理
+            ms_key = f"ms_ng_{doc_name}_{year}_{month}"
+            if ms_key not in st.session_state:
+                st.session_state[ms_key] = current_ng_list
 
-            st.write("▼ **一括操作**（※操作後は下の確定ボタンを押す必要はありません）")
+            st.write("▼ **一括操作**")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
-                st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
+                st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=select_all_ng, args=(ms_key, num_days), use_container_width=True)
             with col_btn2:
-                st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
+                st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=clear_all_ng, args=(ms_key,), use_container_width=True)
 
-            with st.form(key=f"ng_form_{original_idx}"):
-                st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
-                
-                new_ng_list = []
-                
-                cols = st.columns(7)
-                for i, w in enumerate(weekdays_ja):
-                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-                
-                for week in cal_matrix:
-                    cols = st.columns(7)
-                    for i, day in enumerate(week):
-                        if day != 0:
-                            date_obj = datetime.date(year, month, day)
-                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            
-                            if is_hol_or_sun:
-                                day_label = f":red[**{day}日**]"
-                            elif is_sat:
-                                day_label = f":blue[**{day}日**]"
-                            else:
-                                day_label = f"**{day}日**"
-                                
-                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                            
-                            with cols[i]:
-                                if st.checkbox(day_label, key=chk_key):
-                                    new_ng_list.append(day)
-                        else:
-                            with cols[i]:
-                                st.write("")
-                
-                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+            st.write("※休みたい日付を選択してください。（選んだ瞬間に自動保存されます）")
             
-            current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
-            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
+            # スマホ対応バッチリのマルチセレクト
+            selected_ngs = st.multiselect(
+                f"{doc_name}先生のNG日",
+                options=list(range(1, num_days + 1)),
+                key=ms_key,
+                format_func=lambda x: f"{x}日 ({weekdays_ja[datetime.date(year, month, x).weekday()]})",
+                label_visibility="collapsed"
+            )
+            
+            # 選ばれた値をそのままデータフレームに反映
+            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, selected_ngs))
 
 st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
