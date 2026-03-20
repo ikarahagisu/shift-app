@@ -10,6 +10,29 @@ from ortools.sat.python import cp_model
 import jpholiday
 
 # ==========================================
+# 重いCSV読み込みを一瞬で終わらせる魔法（キャッシュ機能）
+# ==========================================
+@st.cache_data
+def parse_staff_csv(file_bytes):
+    try:
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
+    except UnicodeDecodeError:
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
+    if "NG日(半角カンマ区切り)" in df.columns:
+        df = df.drop(columns=["NG日(半角カンマ区切り)"])
+    return df
+
+@st.cache_data
+def parse_fixed_csv(file_bytes):
+    try:
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
+    except UnicodeDecodeError:
+        df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
+    if '区分' in df.columns:
+        df = df.rename(columns={'区分': '平日/休日'})
+    return df
+
+# ==========================================
 # カレンダー部分だけを瞬間的に更新するための魔法（フラグメント機能）
 # ==========================================
 try:
@@ -19,6 +42,15 @@ except AttributeError:
         fragment_decorator = st.experimental_fragment
     except AttributeError:
         fragment_decorator = lambda f: f
+
+def toggle_weekday(doc_name, y, m, target_w, ndays):
+    for d in range(1, ndays + 1):
+        if datetime.date(y, m, d).weekday() == target_w:
+            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
+
+def clear_ng(doc_name, y, m, ndays):
+    for d in range(1, ndays + 1):
+        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = False
 
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
@@ -230,13 +262,8 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（CSV）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
-    try:
-        base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='shift_jis')
-    except UnicodeDecodeError:
-        base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='utf-8')
-        
-    if "NG日(半角カンマ区切り)" in base_df.columns:
-        base_df = base_df.drop(columns=["NG日(半角カンマ区切り)"])
+    # 先ほど作成したキャッシュ魔法で一瞬で読み込みます！
+    base_df = parse_staff_csv(uploaded_file.getvalue())
 else:
     base_df = df_template.copy()
 
@@ -256,18 +283,14 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。**一括ボタンを押しても、全体リロードは起きません！**")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
-# ==========================================
-# 瞬間更新されるカレンダーUI（インライン処理化）
-# ==========================================
 @fragment_decorator
 def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days):
     tabs = st.tabs(doctor_names)
     
     for t_idx, doc_name in enumerate(doctor_names):
         with tabs[t_idx]:
-            # === ▼修正：コールバック(on_click)を廃止し、インラインで瞬時に状態を書き換える▼ ===
             col_text, col_btn = st.columns([5, 1])
             with col_text:
                 st.write("▼ **曜日の一括チェック**")
@@ -282,9 +305,7 @@ def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, 
                     for d in range(1, num_days + 1):
                         if datetime.date(year, month, d).weekday() == i:
                             st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = True
-            # =============================================================================
             
-            # === カレンダー本体の描画 ===
             cols = st.columns(7)
             for i, w in enumerate(weekdays_ja):
                 color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
@@ -318,7 +339,6 @@ def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
-    # フラグメント関数を呼び出す（ここだけが裏で独立して高速に動きます）
     render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days)
 
 st.divider()
@@ -347,14 +367,8 @@ with col_ul_fixed:
 
 if fixed_file is not None:
     try:
-        f_bytes = fixed_file.getvalue()
-        try:
-            base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='shift_jis')
-        except UnicodeDecodeError:
-            base_fixed_df = pd.read_csv(io.BytesIO(f_bytes), encoding='utf-8')
-            
-        if '区分' in base_fixed_df.columns:
-            base_fixed_df = base_fixed_df.rename(columns={'区分': '平日/休日'})
+        # 過去シフトもキャッシュ魔法で一瞬で読み込みます
+        base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
     except Exception as e:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
         base_fixed_df = pd.DataFrame(columns=fixed_columns)
@@ -457,14 +471,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        # === ▼修正：AIがカレンダーUIのチェック状態を確実に直接読み取る処理▼ ===
         doc_ng_list = []
         for d in range(1, num_days + 1):
-            # session_state（カレンダーの記憶）を直接確認する
             if st.session_state.get(f"ng_{doc}_{target_year}_{target_month}_{d}", False):
                 doc_ng_list.append(d)
         ng_days[doc] = doc_ng_list
-        # ======================================================================
                 
         req_days[doc] = []
         req_specific[doc] = []
