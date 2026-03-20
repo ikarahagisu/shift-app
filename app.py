@@ -18,7 +18,8 @@ def parse_staff_csv(file_bytes):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
-    # ※途中保存の復元に使うため、NG日の列は削除せずに残すように変更しました
+    if "NG日(半角カンマ区切り)" in df.columns:
+        df = df.drop(columns=["NG日(半角カンマ区切り)"])
     return df
 
 @st.cache_data
@@ -100,6 +101,7 @@ st.divider()
 st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
 st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
 
+# === ▼カイゼン：文字の色は残しつつ、背景だけ薄い黄色にハイライトするCSS▼ ===
 st.markdown("""
 <style>
 div[data-testid="stCheckbox"] {
@@ -108,15 +110,12 @@ div[data-testid="stCheckbox"] {
     transition: all 0.2s ease;
 }
 div[data-testid="stCheckbox"]:has(input:checked) {
-    background-color: #ffeeee;
-}
-div[data-testid="stCheckbox"]:has(input:checked) p,
-div[data-testid="stCheckbox"]:has(input:checked) span,
-div[data-testid="stCheckbox"]:has(input:checked) strong {
-    color: #ff4b4b !important;
+    background-color: #fffacc; /* 薄い黄色で選択状態をアピール */
+    border: 1px solid #f4d03f;
 }
 </style>
 """, unsafe_allow_html=True)
+# =========================================================================
 
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
@@ -361,7 +360,7 @@ if not valid_staff.empty:
             current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
 
-# === ▼新規追加：一時保存（WIP）ダウンロードボタン▼ ===
+# === 一時保存（WIP）ダウンロードボタン ===
 st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
 
@@ -373,7 +372,6 @@ st.download_button(
     mime="text/csv",
     use_container_width=True
 )
-# =======================================================
 
 st.divider()
 
