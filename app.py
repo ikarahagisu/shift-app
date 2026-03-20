@@ -26,7 +26,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 表の下にある専用の入力欄から、日付をポチポチとクリックして直感的に選べます。（CSVから読み込んだ場合も自動反映されます）
+    * **【NG日】** 表の下にあるカレンダーから、先生ごとにタブを切り替えてNG日をポチポチとクリックして直感的に選べます。（CSVから読み込んだ場合も自動反映されます）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -231,64 +231,67 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表の下の専用欄で設定します）")
+st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表の下のカレンダーで設定します）")
 
-# === ▼UI変更：データエディタで「NG日」列を非表示にする▼ ===
+# NG日の列を表上では非表示にする（データとしては裏で保持する）
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
     use_container_width=True, 
     height=300,
     column_config={
-        "NG日(半角カンマ区切り)": None # 表上では非表示にする（データとしては保持される）
+        "NG日(半角カンマ区切り)": None 
     }
 )
 
 staff_df = edited_df.reset_index()
 
-# === ▼UI変更：NG日をクリックで選べるマルチセレクトUIを追加▼ ===
-st.markdown("##### 🚫 先生ごとのNG日設定（クリックで選択）")
-st.write("※日付の枠をクリックして、ポチポチとNG日を選べます。")
+# === ▼UI大改修：NG日をカレンダーでポチポチ選べる専用UI▼ ===
+st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
-ng_days_selections = {}
-cols = st.columns(4) # 4列に分けてコンパクトに表示
-col_idx = 0
-
-for idx, row in staff_df.iterrows():
-    doc_name = str(row["先生の名前"]).strip()
-    if not doc_name or doc_name == "nan":
-        continue
-        
-    # CSVや初期データから入っているNG日を読み取ってデフォルト値にする
-    existing_ng_str = str(row.get("NG日(半角カンマ区切り)", ""))
-    default_ng = []
-    if existing_ng_str and existing_ng_str.strip() != "" and existing_ng_str != "nan":
-        for x in existing_ng_str.split(','):
-            try:
-                val = int(x.strip())
-                # カレンダーの末日以内の数字だけ有効にする
-                if 1 <= val <= num_days:
-                    default_ng.append(val)
-            except:
-                pass
+# 空白の名前を除外
+valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
+if not valid_staff.empty:
+    doctor_names = valid_staff["先生の名前"].astype(str).tolist()
+    tabs = st.tabs(doctor_names)
     
-    default_ng = list(dict.fromkeys(default_ng)) # 重複排除
-    
-    with cols[col_idx % 4]:
-        selected = st.multiselect(
-            f"🩺 {doc_name}",
-            options=list(range(1, num_days + 1)),
-            default=default_ng,
-            format_func=lambda x: f"{x}日",
-            key=f"ng_multi_{idx}"
-        )
-        ng_days_selections[idx] = selected
-    col_idx += 1
-
-# 選ばれたNG日を、計算用のデータフレームにカンマ区切りで戻してあげる
-for idx, row in staff_df.iterrows():
-    if idx in ng_days_selections:
-        staff_df.at[idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, ng_days_selections[idx]))
+    for t_idx, doc_name in enumerate(doctor_names):
+        original_idx = valid_staff.index[t_idx]
+        with tabs[t_idx]:
+            # 現在のNG日を読み取る（CSVからの初期値もここで拾う）
+            current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
+            current_ng_list = []
+            if current_ng_str and current_ng_str.strip() != "" and current_ng_str != "nan":
+                for x in current_ng_str.split(','):
+                    if x.strip().isdigit():
+                        current_ng_list.append(int(x.strip()))
+            
+            new_ng_list = []
+            
+            # カレンダーのヘッダー描画
+            cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+            
+            # カレンダーの日付（チェックボックス）描画
+            for week in cal_matrix:
+                cols = st.columns(7)
+                for i, day in enumerate(week):
+                    if day != 0:
+                        is_checked = day in current_ng_list
+                        with cols[i]:
+                            # チェックを入れると、上に書いたCSSのおかげで赤くなる
+                            if st.checkbox(f"**{day}日**", value=is_checked, key=f"ng_{original_idx}_{day}"):
+                                new_ng_list.append(day)
+                    else:
+                        with cols[i]:
+                            st.write("")
+            
+            # 選ばれたチェックボックスの内容をカンマ区切りの文字列に戻して、元のデータフレームに上書き
+            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
+# ==========================================================
 
 st.divider()
 
@@ -335,6 +338,7 @@ if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
 st.markdown("##### 📅 決定済みシフトの入力・編集")
+st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
 edited_fixed_df = edited_fixed_df_raw.reset_index()
