@@ -18,8 +18,7 @@ def parse_staff_csv(file_bytes):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
-    if "NG日(半角カンマ区切り)" in df.columns:
-        df = df.drop(columns=["NG日(半角カンマ区切り)"])
+    # ▼修正：ここでNG日を削除してしまう処理を撤廃し、しっかり読み込むようにしました！
     return df
 
 @st.cache_data
@@ -79,7 +78,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。完成した表はCSVでダウンロードできます。
     """)
 
-# === ▼カイゼン：上部・下部カレンダー共通の「格子状・中央揃えデザイン」CSS▼ ===
+# === 上部・下部カレンダー共通の「格子状・中央揃えデザイン」CSS ===
 st.markdown("""
 <style>
 /* 7列のブロック（カレンダーのヘッダーと日付部分）の隙間をなくして密着させる */
@@ -158,7 +157,6 @@ cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
 
-# --- 上部カレンダー描画 ---
 cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
@@ -173,7 +171,6 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    # 枠の中にピッタリ収まるように調整
                     st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; padding: 5px 0;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
@@ -286,11 +283,12 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
-    if st.session_state.get('last_uploaded_file') != uploaded_file.name:
+    # ▼修正：ファイルの中身（ID）が変わった時だけリセットするようにし、確実性をアップしました
+    if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
         for key in list(st.session_state.keys()):
             if key.startswith("ng_"):
                 del st.session_state[key]
-        st.session_state['last_uploaded_file'] = uploaded_file.name
+        st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
     base_df = parse_staff_csv(uploaded_file.getvalue())
 else:
@@ -357,7 +355,6 @@ if not valid_staff.empty:
                 
                 new_ng_list = []
                 
-                # --- 下部カレンダー描画 ---
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
@@ -371,7 +368,6 @@ if not valid_staff.empty:
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
-                            # 文字の色だけ反映し、余計な装飾（バツマークや背景色）はしません
                             if is_hol_or_sun:
                                 day_label = f":red[**{day}日**]"
                             elif is_sat:
