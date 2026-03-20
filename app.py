@@ -60,7 +60,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※選び終わったら必ず「確定する」ボタンを押してください！）
+    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -273,8 +273,9 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 staff_df["NG日(半角カンマ区切り)"] = ""
 
+# === ▼UI変更：不要な確定ボタンを完全に撤去しました▼ ===
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えてお休み（NG）にしたい日を選び、最後に**【確定する】**ボタンを押してください。")
+st.write("※先生のタブを切り替えてお休み（NG）にしたい日を選んでください。（※自動で保存されるため、そのまま一番下の生成ボタンを押して大丈夫です！）")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -285,7 +286,7 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # --- 強化版：CSVなどの初期NG日データを読み取ってチェックを入れる準備 ---
+            # --- 初期値の処理 ---
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
             current_ng_list = []
@@ -298,58 +299,55 @@ if not valid_staff.empty:
                     except:
                         pass
             
-            # まだチェック状態が記憶されていない場合のみ、初期値をセットする
             for d in range(1, num_days + 1):
                 chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = (d in current_ng_list)
 
-            # === ▼追加：全選択と全解除ボタン（横並びで配置）▼ ===
-            st.write("▼ **一括操作**（※操作後、必ず下の確定ボタンを押してください）")
+            # === 一括操作ボタン ===
+            st.write("▼ **一括操作**（クリックすると瞬時にカレンダーに反映されます）")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
                 st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=select_all_ng, args=(doc_name, year, month, num_days), use_container_width=True)
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=clear_all_ng, args=(doc_name, year, month, num_days), use_container_width=True)
 
-            # === カレンダー本体（フォーム形式） ===
-            with st.form(key=f"ng_form_{original_idx}"):
-                new_ng_list = []
-                
-                cols = st.columns(7)
-                for i, w in enumerate(weekdays_ja):
-                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-                
-                for week in cal_matrix:
-                    cols = st.columns(7)
-                    for i, day in enumerate(week):
-                        if day != 0:
-                            date_obj = datetime.date(year, month, day)
-                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            
-                            if is_hol_or_sun:
-                                day_label = f":red[**{day}日**]"
-                            elif is_sat:
-                                day_label = f":blue[**{day}日**]"
-                            else:
-                                day_label = f"**{day}日**"
-                                
-                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                            
-                            with cols[i]:
-                                if st.checkbox(day_label, key=chk_key):
-                                    new_ng_list.append(day)
-                        else:
-                            with cols[i]:
-                                st.write("")
-                
-                # 確定ボタン
-                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+            # === カレンダー本体 ===
+            new_ng_list = []
             
-            # 確定された結果を最終的なデータ（AIに渡す用）に反映
+            cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+            
+            for week in cal_matrix:
+                cols = st.columns(7)
+                for i, day in enumerate(week):
+                    if day != 0:
+                        date_obj = datetime.date(year, month, day)
+                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                        
+                        if is_hol_or_sun:
+                            day_label = f":red[**{day}日**]"
+                        elif is_sat:
+                            day_label = f":blue[**{day}日**]"
+                        else:
+                            day_label = f"**{day}日**"
+                            
+                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                        
+                        with cols[i]:
+                            # 確定ボタン不要でそのまま反映されるチェックボックス
+                            if st.checkbox(day_label, key=chk_key):
+                                new_ng_list.append(day)
+                    else:
+                        with cols[i]:
+                            st.write("")
+            
+            # データへの反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
+# ==========================================================
 
 st.divider()
 
