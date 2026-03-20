@@ -32,6 +32,17 @@ def parse_fixed_csv(file_bytes):
         df = df.rename(columns={'区分': '平日/休日'})
     return df
 
+# ==========================================
+# カレンダー一括操作用の裏側ロジック
+# ==========================================
+def select_all_ng(doc_name, y, m, ndays):
+    for d in range(1, ndays + 1):
+        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
+
+def clear_all_ng(doc_name, y, m, ndays):
+    for d in range(1, ndays + 1):
+        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = False
+
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -273,10 +284,36 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # === 一括ボタンは完全に削除し、純粋なフォームのみにしました ===
+            
+            # --- 強化版：CSVなどの初期NG日データを読み取ってチェックを入れる準備 ---
+            current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
+            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
+            current_ng_list = []
+            if current_ng_str and current_ng_str.lower() not in ["nan", "none", ""]:
+                for x in current_ng_str.split(','):
+                    try:
+                        val = int(float(x.strip()))
+                        if 1 <= val <= num_days:
+                            current_ng_list.append(val)
+                    except:
+                        pass
+            
+            # まだチェック状態が記憶されていない場合のみ、初期値をセットする
+            for d in range(1, num_days + 1):
+                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = (d in current_ng_list)
+
+            # === ▼追加：全選択と全解除ボタン（横並びで配置）▼ ===
+            st.write("▼ **一括操作**（※操作後、必ず下の確定ボタンを押してください）")
+            col_btn1, col_btn2, _ = st.columns([2, 2, 6])
+            with col_btn1:
+                st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=select_all_ng, args=(doc_name, year, month, num_days), use_container_width=True)
+            with col_btn2:
+                st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=clear_all_ng, args=(doc_name, year, month, num_days), use_container_width=True)
+
+            # === カレンダー本体（フォーム形式） ===
             with st.form(key=f"ng_form_{original_idx}"):
-                st.write(f"※カレンダーで休みたい日をポチポチ選び、最後に必ず**【確定する】**ボタンを押してください。（選んでいる最中は一切読み込みは発生しません！）")
-                
                 new_ng_list = []
                 
                 cols = st.columns(7)
@@ -308,8 +345,10 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
+                # 確定ボタン
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
+            # 確定された結果を最終的なデータ（AIに渡す用）に反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 
 st.divider()
