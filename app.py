@@ -94,7 +94,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     width: 100% !important;
     min-width: 0 !important; /* スマホで綺麗に縮むようにする */
     box-sizing: border-box !important; 
-    border: 1px solid #ddd;
+    border: 1px solid #eee;
     border-radius: 4px;
     padding: 5px 0px !important;
     display: flex;
@@ -118,14 +118,20 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
-    justify-content: center;
-    align-items: center;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
 }
 
-/* チェックボックスのヘルプアイコン（?）等で余計な余白ができないように調整 */
+/* ▼【ここが重要！】四角と文字が離れ離れになるのを防ぎ、中央にまとめる ▼ */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
-    padding-right: 0 !important;
-    gap: 4px !important; /* チェックの四角と文字の隙間を詰めて幅を節約 */
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: fit-content !important; /* スマホで横に広がろうとするのを防ぐ */
+    margin: 0 auto !important; /* 全体をマスの中央に寄せる */
+    padding: 0 !important;
+    gap: 4px !important; /* 四角と文字の適度な隙間 */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -351,7 +357,6 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
-            # ▼ 修正ポイント：border=False を追加して枠線を消しました！ ▼
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
                 
