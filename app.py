@@ -68,7 +68,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
-    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に**【確定する】**を押します。
+    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
@@ -287,7 +287,6 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
-# ▼ 修正：ひな形に「NG日」列を追加し、注意喚起メッセージを入れました ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "NG日(半角カンマ区切り)": ["(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)", "", "", "", ""],
@@ -389,7 +388,6 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **保存済みのNG日はありません**")
 
-            # ▼ 修正：一括操作ボタンを補助的に小さく目立たなくしました ▼
             st.markdown("<span style='font-size: 0.8rem; color: #666;'>▼ 補助機能（一括操作）</span>", unsafe_allow_html=True)
             col_btn1, col_btn2, _ = st.columns([1.5, 1.5, 7])
             with col_btn1:
@@ -398,7 +396,8 @@ if not valid_staff.empty:
                 st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False))
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
-                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の青い**【確定する】**ボタンを押して保存してください。")
+                # ▼ 赤いボタンに変更した説明文 ▼
+                st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
                 
                 # 曜日のヘッダー行
                 cols = st.columns(7)
@@ -430,7 +429,6 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
-                # ▼ 修正：メインアクションである「確定」を青色ボタン（primary）に変更しました ▼
                 submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を確定する", type="primary")
             
             # 最新の状態を常に staff_df に反映
@@ -441,7 +439,6 @@ if not valid_staff.empty:
                 st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
 
 st.divider()
-# ▼ 修正：デザインを変え、タイトルも「一時保存」であることを強調しました ▼
 st.markdown("##### 📂 入力途中のデータを一時保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
 
