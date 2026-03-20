@@ -94,7 +94,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 # === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
+/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -106,20 +106,21 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
-    min-width: 0 !important; /* スマホで綺麗に縮むようにする */
+    min-width: 0 !important; 
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; /* トップの余白を固定 */
+    padding: 8px 0px !important; 
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
+    justify-content: flex-start !important; 
     background-color: #ffffff;
     overflow: hidden; 
+    transition: background-color 0.2s ease; /* ハイライト時の色変化を滑らかに */
 }
 
-/* Streamlit特有の余計なマージンを消去して高さを統一 */
+/* Streamlit特有の余計なマージンを消去 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) .element-container {
     margin: 0 !important;
     padding: 0 !important;
@@ -139,14 +140,14 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; /* 全文字の行間を統一 */
+    line-height: 1.5 !important; 
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: flex-start !important; /* 上寄せ */
+    align-items: flex-start !important; 
     width: 100% !important;
 }
 
@@ -288,7 +289,6 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
-# ▼ テンプレートに「入りにくい曜日」を追加 ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "入りにくい曜日(メモ用)": ["水,木", "", "土,日", "", ""],
@@ -329,11 +329,8 @@ if uploaded_file is not None:
                 del st.session_state[key]
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
+    # 古いCSVへの互換性チェックは削除し、そのまま読み込む
     base_df = parse_staff_csv(uploaded_file.getvalue())
-    
-    # ▼ 古いCSVにも対応できるよう、列がなければ追加する ▼
-    if "入りにくい曜日(メモ用)" not in base_df.columns:
-        base_df.insert(1, "入りにくい曜日(メモ用)", "")
 else:
     base_df = df_template.copy()
 
@@ -369,19 +366,26 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # ▼ 「入りにくい曜日」の文字列からハイライトすべき列番号を抽出 ▼
+            # ▼ CSSスコープ用のマーカーをタブ直下に配置し、確実にハイライトを効かせる ▼
+            st.markdown(f'<div class="marker-tab-{t_idx}" style="display:none;"></div>', unsafe_allow_html=True)
+            
             hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(メモ用)", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
                 if w in hard_str:
                     hard_days.append(i)
             
-            # 指定された曜日の列背景を黄色くするCSSを動的に生成
+            # ▼ タブパネル（div[role="tabpanel"] または div[data-testid="stTab"]）に絞って色を塗る！ ▼
             if hard_days:
                 css_rules = ""
                 for hd in hard_days:
-                    # nth-childは1スタートなので hd+1
-                    css_rules += f'div[data-testid="stForm"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}) {{ background-color: #fff9c4 !important; border: 1px solid #fde047 !important; }}\n'
+                    css_rules += f'''
+                    div[role="tabpanel"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}),
+                    div[data-testid="stTab"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}) {{
+                        background-color: #fff9c4 !important;
+                        border-color: #fde047 !important;
+                    }}
+                    '''
                 st.markdown(f"<style>{css_rules}</style>", unsafe_allow_html=True)
 
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
@@ -410,9 +414,6 @@ if not valid_staff.empty:
                 st.info("💡 **保存済みのNG日はありません**")
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
-                # CSSスコープ用の見えないマーカー
-                st.markdown(f'<div class="marker-tab-{t_idx}" style="display:none;"></div>', unsafe_allow_html=True)
-                
                 st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」が黄色くハイライトされています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
@@ -643,7 +644,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
-        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
+        
+        # ▼ 古いデータ対策を削除し、そのまま読み込む ▼
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 2)
 
         max_shifts_per_type[doc] = {
             '宿直A': safe_int(row.get('宿直A上限'), 2),
