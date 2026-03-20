@@ -272,18 +272,27 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # --- 初期値の読み込み ---
             current_ng_list = []
-            
-            # セッションステートの初期化（まだ値がない場合のみ空のリストとして準備）
             for d in range(1, num_days + 1):
                 chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = False
 
-            # === ▼追加：一括選択・クリアボタンのUI▼ ===
-            st.write("▼ **曜日の一括チェック / 全クリア**（※保存前の手動チェックはリセットされます）")
-            b_cols = st.columns([1,1,1,1,1,1,1, 1.5])
+            # === ▼UI修正：全クリアボタンを右上に配置し、曜日ボタンをカレンダー幅にピッタリ合わせました▼ ===
+            col_text, col_btn = st.columns([5, 1])
+            with col_text:
+                st.write("▼ **曜日の一括チェック**（※カレンダー内の手動チェックはリセットされます）")
+            with col_btn:
+                st.button(
+                    "🗑️ 全クリア", 
+                    key=f"btn_clear_{doc_name}_{year}_{month}", 
+                    on_click=clear_ng, 
+                    args=(doc_name, year, month, num_days),
+                    use_container_width=True
+                )
+
+            # 曜日ボタンを下のカレンダーと同じ「7列」で配置
+            b_cols = st.columns(7)
             for i, w in enumerate(weekdays_ja):
                 b_cols[i].button(
                     f"{w}曜", 
@@ -292,15 +301,7 @@ if not valid_staff.empty:
                     args=(doc_name, year, month, i, num_days),
                     use_container_width=True
                 )
-            
-            b_cols[7].button(
-                "🗑️ クリア", 
-                key=f"btn_clear_{doc_name}_{year}_{month}", 
-                on_click=clear_ng, 
-                args=(doc_name, year, month, num_days),
-                use_container_width=True
-            )
-            # ==========================================
+            # ==============================================================================
 
             with st.form(key=f"ng_form_{original_idx}"):
                 st.write(f"※ポチポチと選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
@@ -338,7 +339,6 @@ if not valid_staff.empty:
                 
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
-            # データフレームへの反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
