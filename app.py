@@ -18,9 +18,7 @@ def parse_staff_csv(file_bytes):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
-    # CSVや表からのNG日手入力を廃止したため、列ごと無視する
-    if "NG日(半角カンマ区切り)" in df.columns:
-        df = df.drop(columns=["NG日(半角カンマ区切り)"])
+    # ※途中保存の復元に使うため、NG日の列は削除せずに残すように変更しました
     return df
 
 @st.cache_data
@@ -247,9 +245,16 @@ with col_dl:
         mime="text/csv",
     )
 with col_ul:
-    uploaded_file = st.file_uploader("スタッフ条件（CSV）をアップロード", type="csv", key="staff_csv")
+    uploaded_file = st.file_uploader("スタッフ条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
+    # 新しいファイルがアップロードされたら、古いカレンダーの記憶を一度リセットする処理
+    if st.session_state.get('last_uploaded_file') != uploaded_file.name:
+        for key in list(st.session_state.keys()):
+            if key.startswith("ng_"):
+                del st.session_state[key]
+        st.session_state['last_uploaded_file'] = uploaded_file.name
+        
     base_df = parse_staff_csv(uploaded_file.getvalue())
 else:
     base_df = df_template.copy()
@@ -257,19 +262,25 @@ else:
 if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
+# NG日を格納する列がなければ裏側で作る
+if "NG日(半角カンマ区切り)" not in base_df.columns:
+    base_df["NG日(半角カンマ区切り)"] = ""
+
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は直接クリックして文字を入力できます。")
 
+# 表上では「NG日」列を非表示にして、手入力のミスを防ぎます
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
     use_container_width=True, 
-    height=300
+    height=300,
+    column_config={
+        "NG日(半角カンマ区切り)": None 
+    }
 )
 
 staff_df = edited_df.reset_index()
-# カレンダーで選んだ結果を入れるための空の列を作っておく
-staff_df["NG日(半角カンマ区切り)"] = ""
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 
@@ -282,17 +293,38 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # --- 一括操作ボタン ---
-            st.write("▼ **一括操作**（※ボタンを押すと瞬時にチェックが切り替わります）")
+            # --- 復元処理：途中保存CSVなどからNG日を読み取ってチェックを入れる準備 ---
+            current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
+            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
+            current_ng_list = []
+            if current_ng_str and current_ng_str.lower() not in ["nan", "none", ""]:
+                for x in current_ng_str.split(','):
+                    try:
+                        val = int(float(x.strip()))
+                        if 1 <= val <= num_days:
+                            current_ng_list.append(val)
+                    except:
+                        pass
+            
+            for d in range(1, num_days + 1):
+                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
+                # まだ記憶がなければ、CSVのデータを初期値として採用する
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = (d in current_ng_list)
+
+            # === 一括操作ボタン ===
+            st.write("▼ **一括操作**（※操作後は下の確定ボタンを押す必要はありません）")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
                 st.button("✅ 全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
-            # --- カレンダー本体（フォームによる完全隔離） ---
-            with st.form(key=f"ng_form_{doc_name}_{year}_{month}"):
+            # === カレンダー本体（フォームによる完全隔離） ===
+            with st.form(key=f"ng_form_{original_idx}"):
                 st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
+                
+                new_ng_list = []
                 
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
@@ -316,23 +348,32 @@ if not valid_staff.empty:
                                 
                             chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                             
-                            # 初期状態のセット
-                            if chk_key not in st.session_state:
-                                st.session_state[chk_key] = False
-                                
                             with cols[i]:
-                                # チェックボックス（フォーム内にあるので、クリックしても絶対に読み込みが走りません）
-                                st.checkbox(day_label, key=chk_key)
+                                if st.checkbox(day_label, key=chk_key):
+                                    new_ng_list.append(day)
                         else:
                             with cols[i]:
                                 st.write("")
                 
-                # このボタンが必須になります
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
-            # --- 確定された結果を最終的なデータ（AIに渡す用）に反映 ---
+            # 確定された結果を最終的なデータ（AIに渡す用＆一時保存用）に反映
             current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
+
+# === ▼新規追加：一時保存（WIP）ダウンロードボタン▼ ===
+st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
+st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
+
+current_csv = staff_df.to_csv(index=False).encode('shift_jis')
+st.download_button(
+    label="📥 現在のスタッフ条件を一時保存する（CSVダウンロード）",
+    data=current_csv,
+    file_name=f"staff_wip_{year}_{month}.csv",
+    mime="text/csv",
+    use_container_width=True
+)
+# =======================================================
 
 st.divider()
 
