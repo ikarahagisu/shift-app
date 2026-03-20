@@ -10,19 +10,15 @@ from ortools.sat.python import cp_model
 import jpholiday
 
 # ==========================================
-# カレンダー一括操作用の裏側ロジック（おまじない）
+# カレンダー部分だけを瞬間的に更新するための魔法（フラグメント機能）
 # ==========================================
-def toggle_weekday(doc_name, y, m, target_w, ndays):
-    for d in range(1, ndays + 1):
-        # 指定された曜日と同じ日付のチェックをオンにする
-        if datetime.date(y, m, d).weekday() == target_w:
-            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
-
-def clear_ng(doc_name, y, m, ndays):
-    # 全ての日付のチェックをオフにする
-    for d in range(1, ndays + 1):
-        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = False
-
+try:
+    fragment_decorator = st.fragment
+except AttributeError:
+    try:
+        fragment_decorator = st.experimental_fragment
+    except AttributeError:
+        fragment_decorator = lambda f: f
 
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
@@ -258,89 +254,72 @@ edited_df = st.data_editor(
 )
 
 staff_df = edited_df.reset_index()
-staff_df["NG日(半角カンマ区切り)"] = ""
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。**一括ボタンを使っても画面がもたつかず、瞬間的に反映されます！**")
+
+# ==========================================
+# 瞬間更新されるカレンダーUI（フラグメント化）
+# ==========================================
+@fragment_decorator
+def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days):
+    tabs = st.tabs(doctor_names)
+    
+    for t_idx, doc_name in enumerate(doctor_names):
+        with tabs[t_idx]:
+            # === 一括クリアボタンを右上に配置 ===
+            col_text, col_btn = st.columns([5, 1])
+            with col_text:
+                st.write("▼ **曜日の一括チェック**")
+            with col_btn:
+                if st.button("🗑️ 全クリア", key=f"btn_clear_{doc_name}_{year}_{month}", use_container_width=True):
+                    for d in range(1, num_days + 1):
+                        st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = False
+
+            # === 曜日ボタンをカレンダーと同じ7列幅にピッタリ配置 ===
+            b_cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                if b_cols[i].button(f"{w}曜", key=f"btn_w_{doc_name}_{year}_{month}_{i}", use_container_width=True):
+                    for d in range(1, num_days + 1):
+                        if datetime.date(year, month, d).weekday() == i:
+                            st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = True
+            
+            # === カレンダー本体の描画 ===
+            cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+            
+            for week in cal_matrix:
+                cols = st.columns(7)
+                for i, day in enumerate(week):
+                    if day != 0:
+                        date_obj = datetime.date(year, month, day)
+                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                        
+                        if is_hol_or_sun:
+                            day_label = f":red[**{day}日**]"
+                        elif is_sat:
+                            day_label = f":blue[**{day}日**]"
+                        else:
+                            day_label = f"**{day}日**"
+                            
+                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                        if chk_key not in st.session_state:
+                            st.session_state[chk_key] = False
+                            
+                        with cols[i]:
+                            st.checkbox(day_label, key=chk_key)
+                    else:
+                        with cols[i]:
+                            st.write("")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
-    tabs = st.tabs(doctor_names)
-    
-    for t_idx, doc_name in enumerate(doctor_names):
-        original_idx = valid_staff.index[t_idx]
-        with tabs[t_idx]:
-            
-            current_ng_list = []
-            for d in range(1, num_days + 1):
-                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
-                if chk_key not in st.session_state:
-                    st.session_state[chk_key] = False
-
-            # === ▼UI修正：全クリアボタンを右上に配置し、曜日ボタンをカレンダー幅にピッタリ合わせました▼ ===
-            col_text, col_btn = st.columns([5, 1])
-            with col_text:
-                st.write("▼ **曜日の一括チェック**（※カレンダー内の手動チェックはリセットされます）")
-            with col_btn:
-                st.button(
-                    "🗑️ 全クリア", 
-                    key=f"btn_clear_{doc_name}_{year}_{month}", 
-                    on_click=clear_ng, 
-                    args=(doc_name, year, month, num_days),
-                    use_container_width=True
-                )
-
-            # 曜日ボタンを下のカレンダーと同じ「7列」で配置
-            b_cols = st.columns(7)
-            for i, w in enumerate(weekdays_ja):
-                b_cols[i].button(
-                    f"{w}曜", 
-                    key=f"btn_w_{doc_name}_{year}_{month}_{i}", 
-                    on_click=toggle_weekday, 
-                    args=(doc_name, year, month, i, num_days),
-                    use_container_width=True
-                )
-            # ==============================================================================
-
-            with st.form(key=f"ng_form_{original_idx}"):
-                st.write(f"※ポチポチと選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
-                
-                new_ng_list = []
-                
-                cols = st.columns(7)
-                for i, w in enumerate(weekdays_ja):
-                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-                
-                for week in cal_matrix:
-                    cols = st.columns(7)
-                    for i, day in enumerate(week):
-                        if day != 0:
-                            date_obj = datetime.date(year, month, day)
-                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            
-                            if is_hol_or_sun:
-                                day_label = f":red[**{day}日**]"
-                            elif is_sat:
-                                day_label = f":blue[**{day}日**]"
-                            else:
-                                day_label = f"**{day}日**"
-                                
-                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                            
-                            with cols[i]:
-                                if st.checkbox(day_label, key=chk_key):
-                                    new_ng_list.append(day)
-                        else:
-                            with cols[i]:
-                                st.write("")
-                
-                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
-            
-            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
-# ==========================================================
+    # フラグメント関数を呼び出す（ここだけが裏で独立して高速に動きます）
+    render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days)
 
 st.divider()
 
@@ -478,14 +457,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        ng_str = str(row['NG日(半角カンマ区切り)'])
-        if pd.isna(row['NG日(半角カンマ区切り)']) or ng_str.strip() == "" or ng_str.lower() in ["nan", "none"]:
-            ng_days[doc] = []
-        else:
-            try:
-                ng_days[doc] = [int(x.strip()) for x in ng_str.split(',')]
-            except:
-                ng_days[doc] = []
+        # === AIがカレンダーUIのチェックボックスからNG日を直接読み取る処理 ===
+        doc_ng_list = []
+        for d in range(1, num_days + 1):
+            if st.session_state.get(f"ng_{doc}_{target_year}_{target_month}_{d}", False):
+                doc_ng_list.append(d)
+        ng_days[doc] = doc_ng_list
                 
         req_days[doc] = []
         req_specific[doc] = []
