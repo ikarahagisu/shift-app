@@ -32,26 +32,6 @@ def parse_fixed_csv(file_bytes):
         df = df.rename(columns={'区分': '平日/休日'})
     return df
 
-# ==========================================
-# カレンダー部分だけを瞬間的に更新するための魔法（フラグメント機能）
-# ==========================================
-try:
-    fragment_decorator = st.fragment
-except AttributeError:
-    try:
-        fragment_decorator = st.experimental_fragment
-    except AttributeError:
-        fragment_decorator = lambda f: f
-
-def toggle_weekday(doc_name, y, m, target_w, ndays):
-    for d in range(1, ndays + 1):
-        if datetime.date(y, m, d).weekday() == target_w:
-            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
-
-def clear_ng(doc_name, y, m, ndays):
-    for d in range(1, ndays + 1):
-        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = False
-
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -69,7 +49,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※一括選択ボタンを使うとさらに便利です！）
+    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※選び終わったら必ず「確定する」ボタンを押してください！）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -262,7 +242,6 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（CSV）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
-    # 先ほど作成したキャッシュ魔法で一瞬で読み込みます！
     base_df = parse_staff_csv(uploaded_file.getvalue())
 else:
     base_df = df_template.copy()
@@ -281,19 +260,23 @@ edited_df = st.data_editor(
 )
 
 staff_df = edited_df.reset_index()
+staff_df["NG日(半角カンマ区切り)"] = ""
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
+st.write("※先生のタブを切り替えてお休み（NG）にしたい日を選び、最後に**【確定する】**ボタンを押してください。")
 
-@fragment_decorator
-def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days):
+valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
+if not valid_staff.empty:
+    doctor_names = valid_staff["先生の名前"].astype(str).tolist()
     tabs = st.tabs(doctor_names)
     
     for t_idx, doc_name in enumerate(doctor_names):
+        original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
+            # === 曜日の一括チェックとクリアボタン ===
             col_text, col_btn = st.columns([5, 1])
             with col_text:
-                st.write("▼ **曜日の一括チェック**")
+                st.write("▼ **曜日の一括チェック**（※下のカレンダーの手動チェックはリセットされます）")
             with col_btn:
                 if st.button("🗑️ 全クリア", key=f"btn_clear_{doc_name}_{year}_{month}", use_container_width=True):
                     for d in range(1, num_days + 1):
@@ -306,40 +289,48 @@ def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, 
                         if datetime.date(year, month, d).weekday() == i:
                             st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = True
             
-            cols = st.columns(7)
-            for i, w in enumerate(weekdays_ja):
-                color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
-            
-            for week in cal_matrix:
+            # === フォーム形式のカレンダー（手動ポチポチ中は絶対にリロードされない） ===
+            with st.form(key=f"ng_form_{original_idx}"):
+                st.write(f"※カレンダーで選んだあと、最後に必ず**【確定する】**ボタンを押してください。")
+                
+                new_ng_list = []
+                
                 cols = st.columns(7)
-                for i, day in enumerate(week):
-                    if day != 0:
-                        date_obj = datetime.date(year, month, day)
-                        is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                        is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                        
-                        if is_hol_or_sun:
-                            day_label = f":red[**{day}日**]"
-                        elif is_sat:
-                            day_label = f":blue[**{day}日**]"
+                for i, w in enumerate(weekdays_ja):
+                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+                
+                for week in cal_matrix:
+                    cols = st.columns(7)
+                    for i, day in enumerate(week):
+                        if day != 0:
+                            date_obj = datetime.date(year, month, day)
+                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                            
+                            if is_hol_or_sun:
+                                day_label = f":red[**{day}日**]"
+                            elif is_sat:
+                                day_label = f":blue[**{day}日**]"
+                            else:
+                                day_label = f"**{day}日**"
+                                
+                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                            if chk_key not in st.session_state:
+                                st.session_state[chk_key] = False
+                                
+                            with cols[i]:
+                                if st.checkbox(day_label, key=chk_key):
+                                    new_ng_list.append(day)
                         else:
-                            day_label = f"**{day}日**"
-                            
-                        chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                        if chk_key not in st.session_state:
-                            st.session_state[chk_key] = False
-                            
-                        with cols[i]:
-                            st.checkbox(day_label, key=chk_key)
-                    else:
-                        with cols[i]:
-                            st.write("")
-
-valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
-if not valid_staff.empty:
-    doctor_names = valid_staff["先生の名前"].astype(str).tolist()
-    render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days)
+                            with cols[i]:
+                                st.write("")
+                
+                # 確定ボタン
+                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+            
+            # フォーム内で選択された結果をAIに渡す用のデータに反映
+            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 
 st.divider()
 
@@ -367,7 +358,6 @@ with col_ul_fixed:
 
 if fixed_file is not None:
     try:
-        # 過去シフトもキャッシュ魔法で一瞬で読み込みます
         base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
     except Exception as e:
         st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
