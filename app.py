@@ -1,3 +1,12 @@
+休日の負担をできるだけ減らす（特定の先生に休日の当直・日直が偏らないようにする）ルールの優先順位ですね！承知いたしました。
+
+AIの内部では、**「普通の希望日を叶えること」**と**「休日出勤の最大回数を減らして公平にすること」**を天秤にかけて計算しています。
+これまでは「希望日を叶える」方が少しだけ優先されやすかったのですが、内部の計算ウェイト（ペナルティの重み）を調整し、**「普通の希望日をいくつか犠牲にしてでも、休日出勤の負担を減らす（平準化する）ことを最優先する」**ようにAIの頭脳を書き換えました！
+（※優先度100以上の「絶対希望」や「NG日」はこれまで通り絶対のルールとして守られますのでご安心ください）
+
+アプリの機能や見た目はそのままに、AIの計算ロジックのみをアップデートしています。以下のコードで全体を上書きしてください！
+
+```python
 import streamlit as st
 import pandas as pd
 import datetime
@@ -54,7 +63,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     ### 🧠 AIがシフトを組むときのルール
     AIは以下のルールを守りながら、何万通りもの組み合わせの中から最適なパズルを解き明かします。
     * **【絶対に守るルール】**: 「NG日には入れない」「最低空ける日数を守る（連投禁止）」「月間の最小・最大回数、各枠の上限回数を守る」「優先度100以上の絶対希望日は確実に通す」。
-    * **【なるべく叶えるルール】**: 「優先度付きの希望日を可能な限り多く通す」「土日祝日の勤務回数が一部の人に偏らないよう、全体で公平に分担する」。
+    * **【なるべく叶えるルール】**: 「土日祝日の勤務回数が一部の人に偏らないよう、全体で公平に分担する（最優先）」「優先度付きの希望日を可能な限り多く通す」。
 
     ---
     ### 📝 使い方ステップ
@@ -373,7 +382,6 @@ if not valid_staff.empty:
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = (d in current_ng_list)
 
-            # ▼ 一括操作の文言をスッキリさせました ▼
             st.write("▼ **一括操作**")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
@@ -781,7 +789,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         objective_terms.append(shifts[(d, doc, s_name)] * weight)
                     
     if objective_terms:
-        model.Maximize(sum(objective_terms) - max_hol_shifts * 10)
+        # ▼ 修正：max_hol_shifts のペナルティウェイトを 10 から 1000 に爆上げし、休日の公平化を最優先にしました！ ▼
+        model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
     else:
         model.Minimize(max_hol_shifts)
 
@@ -1008,3 +1017,4 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
             st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
 elif len(staff_df) == 0:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
+```
