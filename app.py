@@ -99,25 +99,29 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     align-items: center;
     justify-content: center;
     background-color: #ffffff;
+    overflow: hidden; /* はみ出し防止 */
 }
 
-/* スマホ用に文字サイズを少し小さくして収める */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) p {
+/* スマホ用に文字サイズを調整し、絶対に改行させない（縦積み防止） */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) p,
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) label,
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
     font-size: 0.8rem !important;
     text-align: center;
     margin: 0;
+    white-space: nowrap !important; /* ←【追加】文字の折り返しを禁止する魔法！ */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center;
+    align-items: center;
 }
 
-/* 曜日などのテキスト中央揃え */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
-    text-align: center;
-    width: 100%;
+/* チェックボックスのヘルプアイコン（?）等で余計な余白ができないように調整 */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
+    padding-right: 0 !important;
 }
 </style>
 """, unsafe_allow_html=True)
