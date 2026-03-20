@@ -18,8 +18,7 @@ def parse_staff_csv(file_bytes):
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='shift_jis')
     except UnicodeDecodeError:
         df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8')
-    if "NG日(半角カンマ区切り)" in df.columns:
-        df = df.drop(columns=["NG日(半角カンマ区切り)"])
+    # ▼修正：ここでNG日を削除してしまう処理を撤廃し、しっかり読み込むようにしました！
     return df
 
 @st.cache_data
@@ -79,34 +78,54 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     💡 **ポイント**: 自動生成ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。完成した表はCSVでダウンロードできます。
     """)
 
-# === ▼カイゼン：もっちりさんのご提案通り「すべて左揃え」の安定した格子状CSS▼ ===
+# === 上部・下部カレンダー共通の「格子状・中央揃えデザイン」CSS ===
 st.markdown("""
 <style>
-/* カレンダーの7列ブロックの隙間を消して密着（格子状）にする */
+/* 7列のブロック（カレンダーのヘッダーと日付部分）の隙間をなくして密着させる */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     gap: 0 !important;
 }
 
-/* 各マスの枠線を設定 */
+/* カレンダーの各マス（セル）に枠線をつけ、中身を完全な中央揃えにする */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
-    border: 1px solid #d0d0d0;
+    border: 1px solid #b0b0b0; /* はっきりとした枠線 */
     margin-right: -1px; /* 枠線の二重描画を防ぐ */
-    margin-bottom: -1px;
-    padding: 10px !important; /* 左寄せのまま、ほどよい余白をとる */
+    margin-bottom: -1px; /* 枠線の二重描画を防ぐ */
+    display: flex;
+    justify-content: center; /* 左右中央揃え */
+    align-items: center; /* 上下中央揃え */
+    padding: 5px 0 !important;
     background-color: #ffffff;
-    min-height: 60px;
+    min-height: 55px; /* マスの高さを一定に保つ */
 }
 
-/* 曜日ヘッダーの背景色を少しグレーに */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(div[data-testid="stCheckbox"])) > div[data-testid="column"] {
-    background-color: #f8f9fa;
-    min-height: 40px;
-    padding: 10px !important;
-}
-
-/* チェックボックスの余計な隙間を詰める */
+/* チェックボックス自体とテキストをセルの中央に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
     margin: 0 !important;
+}
+
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
+    display: flex;
+    justify-content: center !important;
+    align-items: center;
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 「月」「火」などの曜日テキストや、チェックボックスの無い文字を中央に配置 */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -138,13 +157,11 @@ cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
 
-# --- 上部カレンダー曜日ヘッダー ---
 cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
     cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
 
-# --- 上部カレンダー日付描画 ---
 for week in cal_matrix:
     cols = st.columns(7)
     for i, day in enumerate(week):
@@ -154,10 +171,9 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    # ▼ ここをチェックボックスと同じ左揃えにしました！
-                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; padding: 5px; border-radius: 5px;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; padding: 5px 0;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
                 else:
-                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
+                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
                         custom_holidays.append(day)
         else:
             with cols[i]:
@@ -267,6 +283,7 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
+    # ▼修正：ファイルの中身（ID）が変わった時だけリセットするようにし、確実性をアップしました
     if st.session_state.get('last_uploaded_file_id') != uploaded_file.file_id:
         for key in list(st.session_state.keys()):
             if key.startswith("ng_"):
@@ -338,13 +355,11 @@ if not valid_staff.empty:
                 
                 new_ng_list = []
                 
-                # --- 下部カレンダー曜日ヘッダー ---
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                     cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
                 
-                # --- 下部カレンダー日付描画 ---
                 for week in cal_matrix:
                     cols = st.columns(7)
                     for i, day in enumerate(week):
