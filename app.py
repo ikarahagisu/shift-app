@@ -26,7 +26,7 @@ with st.expander("📖 初めての方へ：このアプリの使い方マニュ
     「📥 ひな形（CSV）」をダウンロードしてExcelで入力しアップロードするか、画面上の表を直接クリックして入力・編集してください。
     
     **【各項目の入力ルール】**
-    * **【NG日】** 表の「NG日」列に半角数字で直接入力するか、表の下にあるカレンダーからポチポチとクリックして直感的に選べます。
+    * **【NG日】** 入力表の下にあるカレンダーから、先生ごとにタブを切り替えて休みたい日をポチポチとクリックして選んでください。（※ミス防止のため、CSVや表への直接入力は廃止しました）
     * **【希望日】** 入りたい日を入力します。
         * 日付だけを指定（例: `10, 15`）→ その日の「どれかのシフト」に入ります。
         * 種類まで指定（例: `10:宿直A, 15:日直B`）→ その日の「その枠」を狙います。（※コロン `:` は半角/全角どちらでもOK）
@@ -188,9 +188,9 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
+# === ▼修正：ひな形から「NG日」の列を削除しました▼ ===
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
-    "NG日(半角カンマ区切り)": ["5,12,20", "10", "", "3,4,5", "25,26"],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
@@ -202,7 +202,7 @@ template_data = {
     "日直A上限": [2, 2, 2, 2, 2],
     "日直B上限": [2, 2, 2, 2, 2],
     "外来日直上限": [2, 2, 2, 2, 2],
-    "備考（メモ・説明など自由記入）": ["学会のためNG多め", "15日は午後休", "", "当直明け休み希望", ""]
+    "備考（メモ・説明など自由記入）": ["学会のため休み多め", "15日は午後休", "", "当直明け休み希望", ""]
 }
 df_template = pd.DataFrame(template_data)
 csv_template = df_template.to_csv(index=False).encode('shift_jis')
@@ -224,6 +224,10 @@ if uploaded_file is not None:
         base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='shift_jis')
     except UnicodeDecodeError:
         base_df = pd.read_csv(io.BytesIO(uploaded_file.getvalue()), encoding='utf-8')
+        
+    # === ▼修正：古いCSVがアップロードされても、NG日の列は自動で削除（無視）する▼ ===
+    if "NG日(半角カンマ区切り)" in base_df.columns:
+        base_df = base_df.drop(columns=["NG日(半角カンマ区切り)"])
 else:
     base_df = df_template.copy()
 
@@ -231,9 +235,8 @@ if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は直接クリックして文字を入力できます。（※NG日は表、または下のカレンダーどちらからでも設定可能です）")
+st.write("※以下の表は直接クリックして文字を入力できます。")
 
-# === ▼UI変更：NG日の列を非表示にする設定を削除して復活させました▼ ===
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
@@ -243,8 +246,11 @@ edited_df = st.data_editor(
 
 staff_df = edited_df.reset_index()
 
+# === ▼修正：カレンダー入力の結果を裏で保存する列を作成▼ ===
+staff_df["NG日(半角カンマ区切り)"] = ""
+
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。上の表の「NG日」列にも反映され、計算に使用されます。")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -254,23 +260,6 @@ if not valid_staff.empty:
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
-            # === ▼修正：全角数字や「None」などの文字対策を強力にしました▼ ===
-            current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
-            # 全角数字や全角カンマを半角に自動変換
-            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
-            current_ng_list = []
-            
-            # "nan" や "none" などの文字列は無視する
-            if current_ng_str and current_ng_str.lower() not in ["nan", "none", ""]:
-                for x in current_ng_str.split(','):
-                    try:
-                        # "5.0"のような表記でも正しく "5" として読み取る
-                        val = int(float(x.strip()))
-                        if 1 <= val <= num_days:
-                            current_ng_list.append(val)
-                    except:
-                        pass
-            
             new_ng_list = []
             
             cols = st.columns(7)
@@ -282,8 +271,6 @@ if not valid_staff.empty:
                 cols = st.columns(7)
                 for i, day in enumerate(week):
                     if day != 0:
-                        is_checked = day in current_ng_list
-                        
                         date_obj = datetime.date(year, month, day)
                         is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                         is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
@@ -295,17 +282,16 @@ if not valid_staff.empty:
                         else:
                             day_label = f"**{day}日**"
                             
-                        # === ▼修正：記憶が混ざらないように「先生の名前＋年月」の専用キーを発行▼ ===
                         chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                         
                         with cols[i]:
-                            if st.checkbox(day_label, value=is_checked, key=chk_key):
+                            # Streamlitの機能でチェック状態は自動的に保持されます
+                            if st.checkbox(day_label, key=chk_key):
                                 new_ng_list.append(day)
                     else:
                         with cols[i]:
                             st.write("")
             
-            # カレンダーの選択結果を裏側の計算用データに反映
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(map(str, new_ng_list))
 # ==========================================================
 
