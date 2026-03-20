@@ -101,21 +101,36 @@ st.divider()
 st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
 st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
 
-# === ▼カイゼン：文字の色は残しつつ、背景だけ薄い黄色にハイライトするCSS▼ ===
+# === ▼カイゼン：黄色背景を削除し、チェックマークを「✖」に変更するCSS▼ ===
 st.markdown("""
 <style>
 div[data-testid="stCheckbox"] {
     padding: 5px;
     border-radius: 5px;
-    transition: all 0.2s ease;
 }
-div[data-testid="stCheckbox"]:has(input:checked) {
-    background-color: #fffacc; /* 薄い黄色で選択状態をアピール */
-    border: 1px solid #f4d03f;
+/* チェックボックス自体の背景を赤にし、枠線を消す */
+div[data-testid="stCheckbox"] label input:checked + div {
+    background-color: #ff4b4b !important;
+    border-color: #ff4b4b !important;
+}
+/* デフォルトのチェックマーク（SVG）を非表示にする */
+div[data-testid="stCheckbox"] label input:checked + div svg {
+    display: none !important;
+}
+/* 代わりに「✖」マークをCSSで強引に表示させる */
+div[data-testid="stCheckbox"] label input:checked + div::before {
+    content: "✖";
+    color: white;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: bold;
 }
 </style>
 """, unsafe_allow_html=True)
-# =========================================================================
+# =======================================================================
 
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
@@ -247,7 +262,6 @@ with col_ul:
     uploaded_file = st.file_uploader("スタッフ条件（途中保存CSVも可）をアップロード", type="csv", key="staff_csv")
 
 if uploaded_file is not None:
-    # 新しいファイルがアップロードされたら、古いカレンダーの記憶を一度リセットする処理
     if st.session_state.get('last_uploaded_file') != uploaded_file.name:
         for key in list(st.session_state.keys()):
             if key.startswith("ng_"):
@@ -261,14 +275,12 @@ else:
 if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
-# NG日を格納する列がなければ裏側で作る
 if "NG日(半角カンマ区切り)" not in base_df.columns:
     base_df["NG日(半角カンマ区切り)"] = ""
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は直接クリックして文字を入力できます。")
 
-# 表上では「NG日」列を非表示にして、手入力のミスを防ぎます
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
@@ -292,7 +304,6 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # --- 復元処理：途中保存CSVなどからNG日を読み取ってチェックを入れる準備 ---
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
             current_ng_list = []
@@ -307,11 +318,9 @@ if not valid_staff.empty:
             
             for d in range(1, num_days + 1):
                 chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
-                # まだ記憶がなければ、CSVのデータを初期値として採用する
                 if chk_key not in st.session_state:
                     st.session_state[chk_key] = (d in current_ng_list)
 
-            # === 一括操作ボタン ===
             st.write("▼ **一括操作**（※操作後は下の確定ボタンを押す必要はありません）")
             col_btn1, col_btn2, _ = st.columns([2, 2, 6])
             with col_btn1:
@@ -319,7 +328,6 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
-            # === カレンダー本体（フォームによる完全隔離） ===
             with st.form(key=f"ng_form_{original_idx}"):
                 st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
                 
@@ -356,11 +364,9 @@ if not valid_staff.empty:
                 
                 st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
-            # 確定された結果を最終的なデータ（AIに渡す用＆一時保存用）に反映
             current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
 
-# === 一時保存（WIP）ダウンロードボタン ===
 st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
 
