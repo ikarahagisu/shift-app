@@ -39,6 +39,11 @@ def set_all_ng(doc_name, y, m, ndays, val):
     for d in range(1, ndays + 1):
         st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = val
 
+def toggle_weekday(doc_name, y, m, target_w, ndays):
+    for d in range(1, ndays + 1):
+        if datetime.date(y, m, d).weekday() == target_w:
+            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = True
+
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -101,6 +106,57 @@ st.divider()
 st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
 st.write("※平日を「休日扱い（日直枠あり）」にしたい場合は、対象の日のチェックボックスをポチッとオンにしてください。")
 
+# === ▼カイゼン：カレンダーを紙の表（格子状）のようにし、完全中央揃えにするCSS▼ ===
+st.markdown("""
+<style>
+/* 7列のブロック（ボタンを含まない＝カレンダー部分）をテーブル格子状にする */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(button)) {
+    gap: 0 !important;
+}
+
+/* カレンダーの各マス（セル）の設定 */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(button)) > div[data-testid="column"] {
+    border: 1px solid #b0b0b0; /* はっきりとした枠線 */
+    margin-right: -1px; /* 枠線の二重描画を防ぐ */
+    margin-bottom: -1px; /* 枠線の二重描画を防ぐ */
+    display: flex;
+    justify-content: center; /* 左右中央揃え */
+    align-items: center; /* 上下中央揃え */
+    padding: 10px 0 !important;
+    background-color: #ffffff;
+    min-height: 50px;
+}
+
+/* チェックボックスとテキストをセルのど真ん中に配置 */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(button)) div[data-testid="stCheckbox"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    margin: 0 !important;
+}
+
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(button)) div[data-testid="stCheckbox"] label {
+    display: flex;
+    justify-content: center !important;
+    align-items: center;
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* 曜日テキストなどを中央に */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)):not(:has(button)) div[data-testid="stMarkdownContainer"] {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
+# ==============================================================================
+
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
@@ -108,7 +164,7 @@ custom_holidays = []
 cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
 
 for week in cal_matrix:
     cols = st.columns(7)
@@ -119,7 +175,8 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    st.markdown(f"<div style='text-align: center; color: #ff4b4b; background-color: #ffeeee; padding: 5px; border-radius: 5px; margin-bottom: 10px;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
+                    # 枠の中に綺麗に収まるように微調整
+                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; padding: 5px; border-radius: 5px; width: 100%; margin: 0;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
                         custom_holidays.append(day)
@@ -297,6 +354,11 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("🗑️ 全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
 
+            # 曜日一括チェックボタン
+            b_cols = st.columns(7)
+            for i, w in enumerate(weekdays_ja):
+                b_cols[i].button(f"{w}曜", key=f"btn_w_{doc_name}_{year}_{month}_{i}", on_click=toggle_weekday, args=(doc_name, year, month, i, num_days), use_container_width=True)
+
             with st.form(key=f"ng_form_{original_idx}"):
                 st.write(f"※カレンダーで休みたい日をポチポチ選んだ後、最後に必ず下の**【確定する】**ボタンを押してください。")
                 
@@ -305,7 +367,7 @@ if not valid_staff.empty:
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='text-align: center; color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
                 
                 for week in cal_matrix:
                     cols = st.columns(7)
@@ -315,7 +377,6 @@ if not valid_staff.empty:
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
-                            # ▼ 余計な細工をせず、文字色だけを反映（チェック後も色は保持されます！）
                             if is_hol_or_sun:
                                 day_label = f":red[**{day}日**]"
                             elif is_sat:
