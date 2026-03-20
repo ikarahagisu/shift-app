@@ -89,55 +89,69 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 
 /* 各マスの枠線を設定し、内側の余白（謎の白抜き）を強制ゼロにする */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
-    border: 1px solid #b0b0b0;
-    margin-right: -1px; /* 枠線の二重描画を防ぐ */
-    margin-bottom: -1px;
-    padding: 0 !important; /* ←これが謎の白抜きの原因（パディング）を消す魔法です */
+    border: 1px solid #b0b0b0 !important;
+    margin-right: -1px !important; /* 枠線の二重描画を防ぐ */
+    margin-bottom: -1px !important;
+    padding: 0 !important; /* ←白抜きの原因（パディング）を消す魔法です */
     background-color: #ffffff;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 60px !important;
 }
 
-/* Streamlitが勝手に作る内部ブロックの余白もゼロにする */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stVerticalBlock"] {
+/* Streamlitが勝手に作る内部ブロックの余白もゼロにし、中央配置を継承させる */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] > div[data-testid="stVerticalBlock"] {
     padding: 0 !important;
     gap: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
 }
 
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div.element-container {
-    margin-bottom: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
 }
 
-/* テキストや色付き背景をセルの100%に広げて中央揃え */
+/* --- テキストや色付き背景（休日セル）の完全中央揃え --- */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
 }
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] > p {
-    width: 100%;
-    height: 100%;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+/* --- 平日セル（チェックボックス）の完全中央揃え --- */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
 }
 
-/* チェックボックスをセルのど真ん中に配置 */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
-    width: 100%;
-    height: 60px; /* セルの高さを確保 */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin: 0 !important;
-    padding: 0 !important;
-}
+/* ▼ここが最も重要：チェックボックスの塊を中央に寄せる魔法▼ */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 100%;
-    height: 100%;
-    margin: 0 !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: auto !important; /* 100%にしないことで、左寄りを防ぎます */
+    margin: 0 auto !important; /* 左右マージンautoで親要素のど真ん中に配置 */
     padding: 0 !important;
 }
 </style>
@@ -188,7 +202,6 @@ for week in cal_matrix:
                 if is_weekend_or_hol:
                     st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 60px;'><b>{day}日</b><small style='line-height: 1;'>休</small></div>", unsafe_allow_html=True)
                 else:
-                    # ▼ズレの原因だった「help(？マーク)」を撤去しました！
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
         else:
@@ -386,6 +399,7 @@ if not valid_staff.empty:
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             
+                            # ▼ 余分な装飾はせず、色と文字だけを活かします
                             if is_hol_or_sun:
                                 day_label = f":red[**{day}日**]"
                             elif is_sat:
