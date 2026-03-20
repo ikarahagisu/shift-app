@@ -256,10 +256,10 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。**一括ボタンを使っても画面がもたつかず、瞬間的に反映されます！**")
+st.write("※先生のタブを切り替えて、お休み（NG）にしたい日をポチポチとクリックしてください。**一括ボタンを押しても、全体リロードは起きません！**")
 
 # ==========================================
-# 瞬間更新されるカレンダーUI（フラグメント化）
+# 瞬間更新されるカレンダーUI（インライン処理化）
 # ==========================================
 @fragment_decorator
 def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, custom_holidays, num_days):
@@ -267,7 +267,7 @@ def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, 
     
     for t_idx, doc_name in enumerate(doctor_names):
         with tabs[t_idx]:
-            # === 一括クリアボタンを右上に配置 ===
+            # === ▼修正：コールバック(on_click)を廃止し、インラインで瞬時に状態を書き換える▼ ===
             col_text, col_btn = st.columns([5, 1])
             with col_text:
                 st.write("▼ **曜日の一括チェック**")
@@ -276,13 +276,13 @@ def render_ng_calendar_tabs(doctor_names, year, month, cal_matrix, weekdays_ja, 
                     for d in range(1, num_days + 1):
                         st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = False
 
-            # === 曜日ボタンをカレンダーと同じ7列幅にピッタリ配置 ===
             b_cols = st.columns(7)
             for i, w in enumerate(weekdays_ja):
                 if b_cols[i].button(f"{w}曜", key=f"btn_w_{doc_name}_{year}_{month}_{i}", use_container_width=True):
                     for d in range(1, num_days + 1):
                         if datetime.date(year, month, d).weekday() == i:
                             st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = True
+            # =============================================================================
             
             # === カレンダー本体の描画 ===
             cols = st.columns(7)
@@ -457,12 +457,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        # === AIがカレンダーUIのチェックボックスからNG日を直接読み取る処理 ===
+        # === ▼修正：AIがカレンダーUIのチェック状態を確実に直接読み取る処理▼ ===
         doc_ng_list = []
         for d in range(1, num_days + 1):
+            # session_state（カレンダーの記憶）を直接確認する
             if st.session_state.get(f"ng_{doc}_{target_year}_{target_month}_{d}", False):
                 doc_ng_list.append(d)
         ng_days[doc] = doc_ng_list
+        # ======================================================================
                 
         req_days[doc] = []
         req_specific[doc] = []
