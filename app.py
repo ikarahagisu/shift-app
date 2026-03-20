@@ -108,11 +108,13 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
 /* スマホ用に文字サイズを調整し、絶対に改行させない（縦積み防止） */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) p,
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) label,
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"] {
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"],
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) span {
     font-size: 0.8rem !important;
     text-align: center;
     margin: 0;
     white-space: nowrap !important;
+    word-break: keep-all !important; /* ←【追加】文字の途中での改行を完全に防ぐ */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
@@ -123,7 +125,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
     width: 100% !important;
 }
 
-/* ▼【ここが重要！】四角と文字を「縦並び」にして横幅の限界を突破する！ ▼ */
+/* 四角と文字を「縦並び」にして横幅の限界を突破する！ */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
     display: flex !important;
     flex-direction: column-reverse !important; /* ← 上が「1日」、下が「チェック」になる魔法 */
@@ -180,9 +182,11 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    st.markdown(f"<div style='color: #ff4b4b; background-color: #ffeeee; width: 100%; text-align: center;'><b>{day}日</b><br><small>休</small></div>", unsafe_allow_html=True)
+                    # ▼ 修正：変な背景色をなくし、文字だけを赤くしてスッキリさせました ▼
+                    st.markdown(f"<div style='color: #ff4b4b; text-align: center; white-space: nowrap; line-height: 1.2;'><b>{day}日</b><br><span style='font-size: 0.8em;'>休</span></div>", unsafe_allow_html=True)
                 else:
-                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}", help="クリックで休日扱いに変更"):
+                    # ▼ 修正：help="..." を消して「？」マークを出さないようにしました ▼
+                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
         else:
             with cols[i]:
