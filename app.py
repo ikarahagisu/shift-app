@@ -100,7 +100,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; /* ←【修正】上から詰めてベースラインを揃える */
+    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
     background-color: #ffffff;
     overflow: hidden; 
 }
@@ -125,7 +125,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; /* ←【修正】全文字の行間を統一 */
+    line-height: 1.5 !important; /* 全文字の行間を統一 */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
@@ -145,7 +145,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="st
     width: 100% !important;
     margin: 0 auto !important; 
     padding: 0 !important;
-    gap: 6px !important; /* ←【修正】ここの隙間を休日のCSSと完全に一致させる */
+    gap: 6px !important; 
 }
 </style>
 """, unsafe_allow_html=True)
@@ -193,8 +193,8 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    # ▼ 修正：gap: 6px と上揃え（flex-start）を指定し、チェックボックスと高さを完全一致させました ▼
-                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b;'><b style='font-weight: 600;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
+                    # ▼ 修正：padding-top: 7px; を追加し、チェックボックスがある平日の文字と高さを完全に揃えました ▼
+                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b; padding-top: 7px;'><b style='font-weight: 600;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
