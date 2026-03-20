@@ -418,10 +418,14 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
-                st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
+                # ▼ 【変更】ボタンの戻り値を取得して保存完了の通知を出します ▼
+                submitted = st.form_submit_button(f"💾 {doc_name}先生のNG日を確定する")
             
             current_ngs = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs)
+            
+            if submitted:
+                st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
 
 st.markdown("##### 💾 入力状況の保存（後で再開したい場合）")
 st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
