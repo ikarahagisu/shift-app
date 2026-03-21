@@ -1041,10 +1041,9 @@ if len(staff_df) > 0:
         
         result_height = len(df_result) * 35 + 40
         
-        # ▼ 変更：表を「編集可能な表（st.data_editor）」に変更し、編集後のデータを edited_df として受け取る ▼
+        # ▼ 元の「表示専用の表（st.dataframe）」に戻しました ▼
         with table_container:
-            st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 表のセルをクリックすると、直接先生の名前を書き換えて微調整できます！<br>（書き換えると、下の集計表やダウンロードするCSVにも自動で反映されます）</span>", unsafe_allow_html=True)
-            edited_df = st.data_editor(styled_df, use_container_width=True, hide_index=True, height=result_height)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
         st.divider()
         st.subheader("📊 先生ごとのシフト回数（実績）")
@@ -1075,7 +1074,7 @@ if len(staff_df) > 0:
                             except:
                                 pass
         
-        # ▼ 変更：以下のすべての計算ロジックを df_result から edited_df（手動編集後のデータ）に変更 ▼
+        # ▼ 以下の計算も、元の df_result を参照するように戻しました ▼
         for doc in doctors_list:
             doc_data = {"先生の名前": doc}
             total_count = 0
@@ -1088,8 +1087,8 @@ if len(staff_df) > 0:
             if future_worked_dates and doc in future_worked_dates:
                 doc_working_dates.update(future_worked_dates[doc])
             
-            for d_idx in range(len(edited_df)):
-                row = edited_df.iloc[d_idx]
+            for d_idx in range(len(df_result)):
+                row = df_result.iloc[d_idx]
                 is_working = False
                 for s in shift_columns:
                     cell_val = str(row[s])
@@ -1100,10 +1099,10 @@ if len(staff_df) > 0:
                     doc_working_dates.add(datetime.date(year, month, d_idx + 1))
             
             for s in shift_columns:
-                count = sum(1 for val in edited_df[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                 doc_data[s] = count
                 total_count += count
-                hol_count += sum(1 for val in edited_df[edited_df['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         
             doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
             doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
@@ -1124,8 +1123,8 @@ if len(staff_df) > 0:
                 current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
                 granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
                 for req_d, req_s in req_spec_eval[doc]:
-                    if req_d - 1 < len(edited_df):
-                        row_result = edited_df.iloc[req_d - 1]
+                    if req_d - 1 < len(df_result):
+                        row_result = df_result.iloc[req_d - 1]
                         if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
                             granted += 1
                 doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
@@ -1150,8 +1149,7 @@ if len(staff_df) > 0:
         summary_height = len(df_summary) * 35 + 40
         st.dataframe(styled_summary, use_container_width=True, height=summary_height)
         
-        # ▼ 変更：CSVにも手動編集後のデータを出力する ▼
-        csv_result = edited_df.to_csv(index=False).encode('shift_jis')
+        csv_result = df_result.to_csv(index=False).encode('shift_jis')
         st.download_button(
             label="📥 完成したシフト表をCSVでダウンロード",
             data=csv_result,
