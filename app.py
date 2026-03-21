@@ -260,26 +260,36 @@ st.divider()
 # ==========================================
 # 2. 枠数とカレンダー表示（計算・集計）
 # ==========================================
-total_night_slots = 0
-total_day_slots = 0
+# ▼▼▼ 変更箇所：個別のシフト枠数を計算・表示 ▼▼▼
+shift_counts = {s: 0 for s in NIGHT_SHIFTS_UI + DAY_SHIFTS_UI}
+
 for d in range(1, num_days + 1):
     date_obj = datetime.date(year, month, d)
     is_hol = jpholiday.is_holiday(date_obj) or date_obj.weekday() >= 5 or (d in custom_holidays)
     
     for s in NIGHT_SHIFTS_UI:
-        total_night_slots += multi_slots_dict.get((d, s), 1)
+        shift_counts[s] += multi_slots_dict.get((d, s), 1)
         
     if is_hol:
         for s in DAY_SHIFTS_UI:
-            total_day_slots += multi_slots_dict.get((d, s), 1)
+            shift_counts[s] += multi_slots_dict.get((d, s), 1)
 
-total_slots = total_night_slots + total_day_slots
+total_slots = sum(shift_counts.values())
 
 st.subheader(f"📌 {year}年{month}月の必要シフト枠数")
-col1, col2, col3 = st.columns(3)
-col1.metric("🌙 宿直枠 (A・B・外来)", f"計 {total_night_slots} 枠")
-col2.metric("☀️ 日直枠 (A・B・外来)", f"計 {total_day_slots} 枠")
-col3.metric("🏥 月間 総シフト数", f"合計 {total_slots} 枠")
+
+# 4列と3列の2段構えで各シフトの必要枠数を表示
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
+c2.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
+c3.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
+c4.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
+
+c5, c6, c7 = st.columns(3)
+c5.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
+c6.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
+c7.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
+# ▲▲▲ 変更箇所：ここまで ▲▲▲
 
 st.divider()
 
@@ -375,7 +385,6 @@ edited_df = st.data_editor(
 
 staff_df = edited_df.reset_index()
 
-# ▼▼▼ 新規追加：月間最大回数の合計と余裕度の表示 ▼▼▼
 st.markdown("##### ⚖️ シフト枠と医師の余裕度チェック")
 
 if "月間最大回数" in staff_df.columns:
@@ -398,7 +407,6 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
         st.error("❌ **医師の月間最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各先生の「月間最大回数」を増やすか、増員設定を見直してください。")
 st.divider()
-# ▲▲▲ 新規追加：ここまで ▲▲▲
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 
