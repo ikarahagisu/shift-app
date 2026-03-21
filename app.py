@@ -94,7 +94,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 # === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
+/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -106,15 +106,15 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
-    min-width: 0 !important; /* スマホで綺麗に縮むようにする */
+    min-width: 0 !important; 
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; /* トップの余白を固定 */
+    padding: 8px 0px !important; 
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
+    justify-content: flex-start !important; 
     background-color: #ffffff;
     overflow: hidden; 
 }
@@ -139,14 +139,14 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; /* 全文字の行間を統一 */
+    line-height: 1.5 !important; 
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: flex-start !important; /* 上寄せ */
+    align-items: flex-start !important; 
     width: 100% !important;
 }
 
@@ -403,7 +403,7 @@ if not valid_staff.empty:
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
 
-                # ▼ 修正：背景色を塗るコードを削除し、⚠️マークのみを付与するシンプルな形式にしました ▼
+                # 曜日のヘッダー行 (⚠️マークを追加。背景色は無し)
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
@@ -921,4 +921,138 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
             df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
             
             if success:
-                st.success("✨ シフトの作成に成功しました！個 হারানোর
+                st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
+                
+                def highlight_holidays(row):
+                    styles = [''] * len(row)
+                    if row['平日/休日'] == '休日':
+                        for i, col in enumerate(row.index):
+                            if col in ['日付', '平日/休日']: 
+                                styles[i] = 'color: #ff4b4b; font-weight: bold;'
+                    return styles
+                
+                styled_df = df_result.style.apply(highlight_holidays, axis=1)
+                
+                st.subheader("📅 完成したシフト表")
+                result_height = len(df_result) * 35 + 40
+                st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
+                
+                st.subheader("📊 先生ごとのシフト回数（実績）")
+                shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
+                summary_list = []
+                doctors_list = staff_df['先生の名前'].astype(str).tolist()
+                
+                req_days_eval = {}
+                req_spec_eval = {}
+                for index, row in staff_df.iterrows():
+                    doc = str(row['先生の名前'])
+                    req_days_eval[doc] = []
+                    req_spec_eval[doc] = []
+                    if '希望日(半角カンマ区切り)' in staff_df.columns:
+                        req_str = str(row['希望日(半角カンマ区切り)'])
+                        if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
+                            req_str = req_str.replace('：', ':')
+                            for item in req_str.split(','):
+                                item = item.strip()
+                                if not item: continue
+                                if ':' in item:
+                                    parts = item.split(':')
+                                    try:
+                                        req_spec_eval[doc].append((int(re.sub(r'\D', '', parts[0].strip())), parts[1].strip()))
+                                    except:
+                                        pass
+                                else:
+                                    try:
+                                        req_days_eval[doc].append(int(item))
+                                    except:
+                                        pass
+                
+                for doc in doctors_list:
+                    doc_data = {"先生の名前": doc}
+                    total_count = 0
+                    hol_count = 0
+                    
+                    doc_working_dates = set()
+                    
+                    if past_worked_dates and doc in past_worked_dates:
+                        doc_working_dates.update(past_worked_dates[doc])
+                    if future_worked_dates and doc in future_worked_dates:
+                        doc_working_dates.update(future_worked_dates[doc])
+                    
+                    for d_idx in range(len(df_result)):
+                        row = df_result.iloc[d_idx]
+                        is_working = False
+                        for s in shift_columns:
+                            cell_val = str(row[s])
+                            if doc in [x.strip() for x in re.split(r'[、,]', cell_val)]:
+                                is_working = True
+                                break
+                        if is_working:
+                            doc_working_dates.add(datetime.date(year, month, d_idx + 1))
+                    
+                    for s in shift_columns:
+                        count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                        doc_data[s] = count
+                        total_count += count
+                        hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                                
+                    doc_data["土日祝の回数"] = hol_count
+                    doc_data["総合計"] = total_count
+                    
+                    sorted_dates = sorted(list(doc_working_dates))
+                    if len(sorted_dates) >= 2:
+                        intervals = [(sorted_dates[i] - sorted_dates[i-1]).days - 1 for i in range(1, len(sorted_dates))]
+                        doc_data["最小間隔"] = min(intervals)
+                        doc_data["平均間隔"] = sum(intervals) / len(intervals)
+                    else:
+                        doc_data["最小間隔"] = None
+                        doc_data["平均間隔"] = None
+                        
+                    total_reqs = len(req_days_eval[doc]) + len(req_spec_eval[doc])
+                    if total_reqs > 0:
+                        current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
+                        granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
+                        for req_d, req_s in req_spec_eval[doc]:
+                            if req_d - 1 < len(df_result):
+                                row_result = df_result.iloc[req_d - 1]
+                                if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
+                                    granted += 1
+                        doc_data["希望日の達成"] = f"{granted} / {total_reqs} 回"
+                    else:
+                        doc_data["希望日の達成"] = "-"
+                    
+                    summary_list.append(doc_data)
+                    
+                df_summary = pd.DataFrame(summary_list)
+                df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '土日祝の回数', '総合計', '希望日の達成', '最小間隔', '平均間隔']]
+                
+                df_summary = df_summary.set_index('先生の名前')
+                
+                styled_summary = df_summary.style.format(
+                    {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
+                ).set_properties(
+                    subset=['総合計'], **{'font-weight': 'bold'}
+                ).set_properties(
+                    subset=['希望日の達成'], **{'text-align': 'center'}
+                )
+                
+                summary_height = len(df_summary) * 35 + 40
+                st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+                
+                csv_result = df_result.to_csv(index=False).encode('shift_jis')
+                st.download_button(
+                    label="📥 完成したシフト表をCSVでダウンロード",
+                    data=csv_result,
+                    file_name=f"shift_{year}_{month}_result.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.error("入力された条件に誤りがあるか、条件が厳しすぎてシフトが組めませんでした。")
+                st.warning("💡 **以下の原因が考えられます。Excelの入力や設定画面を見直してください。**")
+                for reason in error_reasons:
+                    st.write(reason)
+                    
+        except Exception as e:
+            st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
+elif len(staff_df) == 0:
+    st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
