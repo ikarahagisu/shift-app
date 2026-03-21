@@ -940,6 +940,16 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
                 doctors_list = staff_df['先生の名前'].astype(str).tolist()
                 
+                # ▼ 追加：ハイライトしたい先生を選ぶUI ▼
+                st.subheader("📅 完成したシフト表")
+                
+                # Streamlitの機能で、結果表示後でも動的にハイライトを変えられるようにセレクトボックスを設置
+                highlight_doc = st.selectbox(
+                    "🔍 特定の先生のシフトをハイライトする",
+                    options=["（ハイライトなし）"] + doctors_list,
+                    index=0
+                )
+                
                 def highlight_holidays(row):
                     styles = [''] * len(row)
                     if row['平日/休日'] == '休日':
@@ -948,42 +958,20 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
-                # ▼ 変更：40名以上の医師を区別するため、50色の異なるカラーパレットを用意 ▼
-                distinct_colors = [
-                    '#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF',
-                    '#800000', '#008000', '#000080', '#808000', '#800080', '#008080',
-                    '#FFA500', '#FF1493', '#00FA9A', '#1E90FF', '#FF69B4', '#8A2BE2',
-                    '#A52A2A', '#DEB887', '#5F9EA0', '#7FFF00', '#D2691E', '#FF7F50',
-                    '#6495ED', '#DC143C', '#00008B', '#008B8B', '#B8860B', '#006400',
-                    '#BDB76B', '#8B008B', '#556B2F', '#FF8C00', '#9932CC', '#8B0000',
-                    '#E9967A', '#8FBC8F', '#483D8B', '#2F4F4F', '#00CED1', '#9400D3',
-                    '#FFD700', '#DAA520', '#ADFF2F', '#CD5C5C', '#4B0082', '#F08080',
-                    '#20B2AA', '#778899'
-                ]
-                doc_colors = {doc: distinct_colors[i % len(distinct_colors)] for i, doc in enumerate(doctors_list)}
-                
-                def color_doctors(val):
+                # ▼ 変更：選ばれた先生だけを黄色く目立たせる関数 ▼
+                def color_highlighted_doctor(val):
                     val_str = str(val)
-                    if val_str == "-" or val_str == "":
-                        return ''
-                    for doc, color in doc_colors.items():
-                        if doc in val_str:
-                            return f'background-color: {color}; color: #000000; font-weight: 500;'
+                    if highlight_doc != "（ハイライトなし）" and highlight_doc in val_str:
+                        return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
                     return ''
                 
                 base_style = df_result.style.apply(highlight_holidays, axis=1)
+                
+                # Pandasのバージョン互換性対応
                 if hasattr(base_style, 'map'):
-                    styled_df = base_style.map(color_doctors, subset=shift_columns)
+                    styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
                 else:
-                    styled_df = base_style.applymap(color_doctors, subset=shift_columns)
-                
-                st.subheader("📅 完成したシフト表")
-                
-                legend_html = "<div style='display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;'>"
-                for doc, color in doc_colors.items():
-                    legend_html += f"<div style='display: flex; align-items: center; gap: 4px;'><div style='width: 16px; height: 16px; background-color: {color}; border: 1px solid #ccc; border-radius: 3px;'></div><span style='font-size: 0.9rem;'>{doc}</span></div>"
-                legend_html += "</div>"
-                st.markdown(legend_html, unsafe_allow_html=True)
+                    styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
                 
                 result_height = len(df_result) * 35 + 40
                 st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
