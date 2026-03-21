@@ -912,9 +912,132 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if max_hol_available < req_hol_total:
             reasons.append(f"❌ **休日シフト枠の不足**: 月間に必要な休日の総枠数({req_hol_total}枠)に対して、先生全員の「休日最大回数」の合計({max_hol_available}回分)が足りていません。各人の休日最大回数を増やしてください。")
 
+
         if not reasons:
-            reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、人ごとの「最低空ける日数」や「最大回数」ルールの連鎖によってどこかの日程でパズルが破綻しています。条件の厳しい先生の設定を緩めてみてください。")
-            
+            try:
+                # エラー原因究明用の「ゴーストドクターを許容する緩いモデル（プランB）」を作成
+                relax_model = cp_model.CpModel()
+                r_shifts = {}
+                dummies = {}
+
+                for d in range(1, num_days + 1):
+                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                    for s in active_shifts:
+                        dummies[(d, s)] = relax_model.NewIntVar(0, 10, f'dummy_d{d}_{s}')
+                        for doc in doctors:
+                            r_shifts[(d, doc, s)] = relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}')
+
+                # 1. 人数確保（ゴーストドクターのダミーを許容）
+                for d in range(1, num_days + 1):
+                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                    for s in active_shifts:
+                        req_count = multi_slots_dict.get((d, s), 1)
+                        relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == req_count)
+
+                # 2. 先生の制約（プランAと完全に同じものを適用し、絶対に崩さない）
+                for doc in doctors:
+                    for d in range(1, num_days + 1):
+                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                        fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in active_shifts)
+                        max_shifts_today = max(1, fixed_count)
+                        relax_model.Add(sum(r_shifts[(d, doc, s)] for s in active_shifts) <= max_shifts_today)
+
+                    for d in ng_days[doc]:
+                        if 1 <= d <= num_days:
+                            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                            for s in active_shifts:
+                                relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                    for d in absolute_req_days[doc]:
+                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                        relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in active_shifts)
+
+                    for d, s_name in absolute_req_specific[doc]:
+                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                        if s_name in active_shifts:
+                            relax_model.Add(r_shifts[(d, doc, s_name)] == 1)
+
+                    # 各上限
+                    for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
+                        worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)]
+                        if worked:
+                            specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
+                            actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count)
+                            relax_model.Add(sum(worked) <= actual_max_type)
+
+                    worked_all = []
+                    for d in range(1, num_days + 1):
+                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                        for s in active_shifts:
+                            worked_all.append(r_shifts[(d, doc, s)])
+                    if worked_all:
+                        all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
+                        actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
+                        relax_model.Add(sum(worked_all) <= actual_max_total)
+
+                    hol_shifts = []
+                    for d in range(1, num_days + 1):
+                        if is_holiday(target_year, target_month, d):
+                            for s in NIGHT_SHIFTS + DAY_SHIFTS:
+                                hol_shifts.append(r_shifts[(d, doc, s)])
+                    abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
+                    abs_hol_count += sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
+                    actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count)
+                    relax_model.Add(sum(hol_shifts) <= actual_hol_max)
+
+                    # 間隔
+                    interval = min_intervals[doc]
+                    if interval > 0:
+                        all_abs_dates = set(absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]])
+                        for d in range(1, num_days + 1):
+                            if d in all_abs_dates: continue
+                            current_date = datetime.date(target_year, target_month, d)
+                            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+
+                            for past_date in past_worked_dates[doc]:
+                                if 0 < (current_date - past_date).days <= interval:
+                                    for s in active_shifts: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                            for future_date in future_worked_dates[doc]:
+                                if 0 < (future_date - current_date).days <= interval:
+                                    for s in active_shifts: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                            for d1 in range(1, num_days + 1):
+                                for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
+                                    if d1 in all_abs_dates and d2 in all_abs_dates: continue
+                                    active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
+                                    active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
+                                    for s1 in active_shifts_d1:
+                                        for s2 in active_shifts_d2:
+                                            relax_model.Add(r_shifts[(d1, doc, s1)] + r_shifts[(d2, doc, s2)] <= 1)
+
+                # 3. ゴースト（ダミー）の数を極限まで少なくする
+                relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)))
+
+                relax_solver = cp_model.CpSolver()
+                relax_solver.parameters.max_time_in_seconds = 15.0
+                relax_status = relax_solver.Solve(relax_model)
+
+                if relax_status == cp_model.OPTIMAL or relax_status == cp_model.FEASIBLE:
+                    bottlenecks = []
+                    for d in range(1, num_days + 1):
+                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+                        for s in active_shifts:
+                            val = relax_solver.Value(dummies[(d, s)])
+                            if val > 0:
+                                bottlenecks.append(f"・{target_month}月{d}日の「{s}」（あと {val} 人足りません）")
+
+                    if bottlenecks:
+                        reasons.append("🚨 **以下のシフト枠を埋める人が見つかりませんでした。**")
+                        reasons.append("（※全員の勤務間隔、NG日、他シフトとの被りなどを守ろうとした結果、この枠がどうしても空いてしまいます。該当箇所周辺の希望を見直してください）")
+                        reasons.extend(bottlenecks)
+                    else:
+                        reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。")
+                else:
+                    reasons.append("⚠️ 条件が非常に厳しく、原因箇所の特定も困難な状態です。全員の間隔やNG日を少し緩めてみてください。")
+            except Exception as e:
+                reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。条件を緩めてください。")
+        # ▲▲▲ 変更箇所：ここまで ▲▲▲
+
         return None, False, reasons, None, None
 
 # ==========================================
