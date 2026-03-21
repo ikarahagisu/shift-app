@@ -1010,7 +1010,10 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         total_count += count
                         hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                                 
-                    doc_data["土日祝の回数"] = hol_count
+                    # ▼ 追加・修正：宿直合計、日直合計、列名の変更 ▼
+                    doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
+                    doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
+                    doc_data["休日回数"] = hol_count
                     doc_data["総合計"] = total_count
                     
                     sorted_dates = sorted(list(doc_working_dates))
@@ -1031,23 +1034,24 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                                 row_result = df_result.iloc[req_d - 1]
                                 if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
                                     granted += 1
-                        doc_data["希望日の達成"] = f"{granted} / {total_reqs} 回"
+                        doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
                     else:
-                        doc_data["希望日の達成"] = "-"
+                        doc_data["希望日達成"] = "-"
                     
                     summary_list.append(doc_data)
                     
                 df_summary = pd.DataFrame(summary_list)
-                df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '土日祝の回数', '総合計', '希望日の達成', '最小間隔', '平均間隔']]
+                # ▼ 修正：列の並び順に「宿直回数」「日直回数」を挿入し、列名を反映 ▼
+                df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
                 
                 df_summary = df_summary.set_index('先生の名前')
                 
                 styled_summary = df_summary.style.format(
                     {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
                 ).set_properties(
-                    subset=['総合計'], **{'font-weight': 'bold'}
+                    subset=['総合計', '宿直回数', '日直回数'], **{'font-weight': 'bold'}
                 ).set_properties(
-                    subset=['希望日の達成'], **{'text-align': 'center'}
+                    subset=['希望日達成'], **{'text-align': 'center'}
                 )
                 
                 summary_height = len(df_summary) * 35 + 40
