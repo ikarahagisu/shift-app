@@ -94,7 +94,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 # === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
+/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -106,15 +106,15 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
-    min-width: 0 !important; 
+    min-width: 0 !important; /* スマホで綺麗に縮むようにする */
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; 
+    padding: 8px 0px !important; /* トップの余白を固定 */
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; 
+    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
     background-color: #ffffff;
     overflow: hidden; 
 }
@@ -139,14 +139,14 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; 
+    line-height: 1.5 !important; /* 全文字の行間を統一 */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: flex-start !important; 
+    align-items: flex-start !important; /* 上寄せ */
     width: 100% !important;
 }
 
@@ -403,13 +403,11 @@ if not valid_staff.empty:
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
 
-                # 曜日のヘッダー行 (⚠️マークを追加。背景色は無し)
+                # ▼ 変更：曜日のヘッダー行からは ⚠️マーク を削除しました ▼
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    is_hard = i in hard_days
-                    warning_mark = "⚠️" if is_hard else ""
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w} {warning_mark}</div>", unsafe_allow_html=True)
+                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
                 
                 # 日付とチェックボックス
                 for week in cal_matrix:
