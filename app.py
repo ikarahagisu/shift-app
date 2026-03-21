@@ -929,169 +929,182 @@ staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
 fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
 
-if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生成する", type="primary"):
-    with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
-        try:
-            df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
-            
-            if success:
-                st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
+if len(staff_df) > 0:
+    # 実行ボタンが押されたときの処理
+    if st.button("🚀 このデータでシフトを自動生成する", type="primary"):
+        with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
+            try:
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
                 
-                shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
-                doctors_list = staff_df['先生の名前'].astype(str).tolist()
-                
-                # ▼ 追加：ハイライトしたい先生を選ぶUI ▼
-                st.subheader("📅 完成したシフト表")
-                
-                # Streamlitの機能で、結果表示後でも動的にハイライトを変えられるようにセレクトボックスを設置
-                highlight_doc = st.selectbox(
-                    "🔍 特定の先生のシフトをハイライトする",
-                    options=["（ハイライトなし）"] + doctors_list,
-                    index=0
-                )
-                
-                def highlight_holidays(row):
-                    styles = [''] * len(row)
-                    if row['平日/休日'] == '休日':
-                        for i, col in enumerate(row.index):
-                            if col in ['日付', '平日/休日']: 
-                                styles[i] = 'color: #ff4b4b; font-weight: bold;'
-                    return styles
-                
-                # ▼ 変更：選ばれた先生だけを黄色く目立たせる関数 ▼
-                def color_highlighted_doctor(val):
-                    val_str = str(val)
-                    if highlight_doc != "（ハイライトなし）" and highlight_doc in val_str:
-                        return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
-                    return ''
-                
-                base_style = df_result.style.apply(highlight_holidays, axis=1)
-                
-                # Pandasのバージョン互換性対応
-                if hasattr(base_style, 'map'):
-                    styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
+                if success:
+                    # ★修正ポイント：画面が再読み込みされてもデータが消えないように「セッション状態」に保存！
+                    st.session_state['generated_df'] = df_result
+                    st.session_state['past_worked_dates'] = past_worked_dates
+                    st.session_state['future_worked_dates'] = future_worked_dates
+                    st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
                 else:
-                    styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
-                
-                result_height = len(df_result) * 35 + 40
-                st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
-                
-                st.subheader("📊 先生ごとのシフト回数（実績）")
-                summary_list = []
-                
-                req_days_eval = {}
-                req_spec_eval = {}
-                for index, row in staff_df.iterrows():
-                    doc = str(row['先生の名前'])
-                    req_days_eval[doc] = []
-                    req_spec_eval[doc] = []
-                    if '希望日(半角カンマ区切り)' in staff_df.columns:
-                        req_str = str(row['希望日(半角カンマ区切り)'])
-                        if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
-                            req_str = req_str.replace('：', ':')
-                            for item in req_str.split(','):
-                                item = item.strip()
-                                if not item: continue
-                                if ':' in item:
-                                    parts = item.split(':')
-                                    try:
-                                        req_spec_eval[doc].append((int(re.sub(r'\D', '', parts[0].strip())), parts[1].strip()))
-                                    except:
-                                        pass
-                                else:
-                                    try:
-                                        req_days_eval[doc].append(int(item))
-                                    except:
-                                        pass
-                
-                for doc in doctors_list:
-                    doc_data = {"先生の名前": doc}
-                    total_count = 0
-                    hol_count = 0
-                    
-                    doc_working_dates = set()
-                    
-                    if past_worked_dates and doc in past_worked_dates:
-                        doc_working_dates.update(past_worked_dates[doc])
-                    if future_worked_dates and doc in future_worked_dates:
-                        doc_working_dates.update(future_worked_dates[doc])
-                    
-                    for d_idx in range(len(df_result)):
-                        row = df_result.iloc[d_idx]
-                        is_working = False
-                        for s in shift_columns:
-                            cell_val = str(row[s])
-                            if doc in [x.strip() for x in re.split(r'[、,]', cell_val)]:
-                                is_working = True
-                                break
-                        if is_working:
-                            doc_working_dates.add(datetime.date(year, month, d_idx + 1))
-                    
-                    for s in shift_columns:
-                        count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
-                        doc_data[s] = count
-                        total_count += count
-                        hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
-                                
-                    doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
-                    doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
-                    doc_data["休日回数"] = hol_count
-                    doc_data["総合計"] = total_count
-                    
-                    sorted_dates = sorted(list(doc_working_dates))
-                    if len(sorted_dates) >= 2:
-                        intervals = [(sorted_dates[i] - sorted_dates[i-1]).days - 1 for i in range(1, len(sorted_dates))]
-                        doc_data["最小間隔"] = min(intervals)
-                        doc_data["平均間隔"] = sum(intervals) / len(intervals)
-                    else:
-                        doc_data["最小間隔"] = None
-                        doc_data["平均間隔"] = None
+                    # エラーの場合は過去の結果を消す
+                    if 'generated_df' in st.session_state:
+                        del st.session_state['generated_df']
+                    st.error("入力された条件に誤りがあるか、条件が厳しすぎてシフトが組めませんでした。")
+                    st.warning("💡 **以下の原因が考えられます。Excelの入力や設定画面を見直してください。**")
+                    for reason in error_reasons:
+                        st.write(reason)
+            except Exception as e:
+                st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
+
+    # ★修正ポイント：保存されたデータがあれば、ボタンが押されていなくても常に結果を表示する
+    if 'generated_df' in st.session_state:
+        df_result = st.session_state['generated_df']
+        past_worked_dates = st.session_state.get('past_worked_dates', {})
+        future_worked_dates = st.session_state.get('future_worked_dates', {})
+        
+        shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
+        doctors_list = staff_df['先生の名前'].astype(str).tolist()
+        
+        st.subheader("📅 完成したシフト表")
+        
+        # セレクトボックス（ここで選んでも、上のsession_stateのおかげで消えません！）
+        highlight_doc = st.selectbox(
+            "🔍 特定の先生のシフトをハイライトする",
+            options=["（ハイライトなし）"] + doctors_list,
+            index=0
+        )
+        
+        def highlight_holidays(row):
+            styles = [''] * len(row)
+            if row['平日/休日'] == '休日':
+                for i, col in enumerate(row.index):
+                    if col in ['日付', '平日/休日']: 
+                        styles[i] = 'color: #ff4b4b; font-weight: bold;'
+            return styles
+        
+        def color_highlighted_doctor(val):
+            val_str = str(val)
+            if highlight_doc != "（ハイライトなし）" and highlight_doc in val_str:
+                return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
+            return ''
+        
+        base_style = df_result.style.apply(highlight_holidays, axis=1)
+        
+        # Pandasのバージョン互換性対応
+        if hasattr(base_style, 'map'):
+            styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
+        else:
+            styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
+        
+        result_height = len(df_result) * 35 + 40
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
+        
+        st.subheader("📊 先生ごとのシフト回数（実績）")
+        summary_list = []
+        
+        req_days_eval = {}
+        req_spec_eval = {}
+        for index, row in staff_df.iterrows():
+            doc = str(row['先生の名前'])
+            req_days_eval[doc] = []
+            req_spec_eval[doc] = []
+            if '希望日(半角カンマ区切り)' in staff_df.columns:
+                req_str = str(row['希望日(半角カンマ区切り)'])
+                if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
+                    req_str = req_str.replace('：', ':')
+                    for item in req_str.split(','):
+                        item = item.strip()
+                        if not item: continue
+                        if ':' in item:
+                            parts = item.split(':')
+                            try:
+                                req_spec_eval[doc].append((int(re.sub(r'\D', '', parts[0].strip())), parts[1].strip()))
+                            except:
+                                pass
+                        else:
+                            try:
+                                req_days_eval[doc].append(int(item))
+                            except:
+                                pass
+        
+        for doc in doctors_list:
+            doc_data = {"先生の名前": doc}
+            total_count = 0
+            hol_count = 0
+            
+            doc_working_dates = set()
+            
+            if past_worked_dates and doc in past_worked_dates:
+                doc_working_dates.update(past_worked_dates[doc])
+            if future_worked_dates and doc in future_worked_dates:
+                doc_working_dates.update(future_worked_dates[doc])
+            
+            for d_idx in range(len(df_result)):
+                row = df_result.iloc[d_idx]
+                is_working = False
+                for s in shift_columns:
+                    cell_val = str(row[s])
+                    if doc in [x.strip() for x in re.split(r'[、,]', cell_val)]:
+                        is_working = True
+                        break
+                if is_working:
+                    doc_working_dates.add(datetime.date(year, month, d_idx + 1))
+            
+            for s in shift_columns:
+                count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                doc_data[s] = count
+                total_count += count
+                hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         
-                    total_reqs = len(req_days_eval[doc]) + len(req_spec_eval[doc])
-                    if total_reqs > 0:
-                        current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
-                        granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
-                        for req_d, req_s in req_spec_eval[doc]:
-                            if req_d - 1 < len(df_result):
-                                row_result = df_result.iloc[req_d - 1]
-                                if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
-                                    granted += 1
-                        doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
-                    else:
-                        doc_data["希望日達成"] = "-"
-                    
-                    summary_list.append(doc_data)
-                    
-                df_summary = pd.DataFrame(summary_list)
-                df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
-                
-                df_summary = df_summary.set_index('先生の名前')
-                
-                styled_summary = df_summary.style.format(
-                    {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
-                ).set_properties(
-                    subset=['総合計', '宿直回数', '日直回数'], **{'font-weight': 'bold'}
-                ).set_properties(
-                    subset=['希望日達成'], **{'text-align': 'center'}
-                )
-                
-                summary_height = len(df_summary) * 35 + 40
-                st.dataframe(styled_summary, use_container_width=True, height=summary_height)
-                
-                csv_result = df_result.to_csv(index=False).encode('shift_jis')
-                st.download_button(
-                    label="📥 完成したシフト表をCSVでダウンロード",
-                    data=csv_result,
-                    file_name=f"shift_{year}_{month}_result.csv",
-                    mime="text/csv",
-                )
+            doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
+            doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
+            doc_data["休日回数"] = hol_count
+            doc_data["総合計"] = total_count
+            
+            sorted_dates = sorted(list(doc_working_dates))
+            if len(sorted_dates) >= 2:
+                intervals = [(sorted_dates[i] - sorted_dates[i-1]).days - 1 for i in range(1, len(sorted_dates))]
+                doc_data["最小間隔"] = min(intervals)
+                doc_data["平均間隔"] = sum(intervals) / len(intervals)
             else:
-                st.error("入力された条件に誤りがあるか、条件が厳しすぎてシフトが組めませんでした。")
-                st.warning("💡 **以下の原因が考えられます。Excelの入力や設定画面を見直してください。**")
-                for reason in error_reasons:
-                    st.write(reason)
-                    
-        except Exception as e:
-            st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
+                doc_data["最小間隔"] = None
+                doc_data["平均間隔"] = None
+                
+            total_reqs = len(req_days_eval[doc]) + len(req_spec_eval[doc])
+            if total_reqs > 0:
+                current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
+                granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
+                for req_d, req_s in req_spec_eval[doc]:
+                    if req_d - 1 < len(df_result):
+                        row_result = df_result.iloc[req_d - 1]
+                        if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
+                            granted += 1
+                doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
+            else:
+                doc_data["希望日達成"] = "-"
+            
+            summary_list.append(doc_data)
+            
+        df_summary = pd.DataFrame(summary_list)
+        df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
+        
+        df_summary = df_summary.set_index('先生の名前')
+        
+        styled_summary = df_summary.style.format(
+            {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
+        ).set_properties(
+            subset=['総合計', '宿直回数', '日直回数'], **{'font-weight': 'bold'}
+        ).set_properties(
+            subset=['希望日達成'], **{'text-align': 'center'}
+        )
+        
+        summary_height = len(df_summary) * 35 + 40
+        st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+        
+        csv_result = df_result.to_csv(index=False).encode('shift_jis')
+        st.download_button(
+            label="📥 完成したシフト表をCSVでダウンロード",
+            data=csv_result,
+            file_name=f"shift_{year}_{month}_result.csv",
+            mime="text/csv",
+        )
+
 elif len(staff_df) == 0:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
