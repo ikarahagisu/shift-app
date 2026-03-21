@@ -960,38 +960,39 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 変更：スマホでも横並びを維持する専用のCSSを追加 ▼
+        # ▼ 変更：列(columns)を使わず、チェックボックスを「文字」のように横にずらずら流し込む魔法のCSS ▼
         st.markdown("""
         <style>
-        /* 先生ハイライト用のチェックボックス（4列構成）をスマホで縦積みさせず、3列のグリッドにする魔法 */
-        @media (max-width: 640px) {
-            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(4):last-child) {
-                display: flex !important;
-                flex-wrap: wrap !important;
-            }
-            div[data-testid="stHorizontalBlock"]:has(> div:nth-child(4):last-child) > div[data-testid="column"] {
-                width: 33.3% !important; /* スマホ画面では3列に配置（長すぎる名前があれば50%にすると2列になります） */
-                min-width: 33.3% !important;
-                flex: 0 0 33.3% !important;
-            }
+        /* 全てのチェックボックスのブロックをインライン（横並び）にする */
+        div.element-container:has(div[data-testid="stCheckbox"]) {
+            display: inline-block !important;
+            width: auto !important;
+            margin-right: 15px !important;
+            margin-bottom: 5px !important;
+        }
+        /* チェックボックス自体の幅を文字数に合わせる */
+        div[data-testid="stCheckbox"] {
+            width: auto !important;
+        }
+        /* ただし、上の「カレンダー（7列）」の中にあるチェックボックスだけは、カレンダーのレイアウトを維持するために除外（上書き）する */
+        div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div.element-container:has(div[data-testid="stCheckbox"]) {
+            display: flex !important;
+            width: 100% !important;
+            margin-right: 0 !important;
         }
         </style>
         """, unsafe_allow_html=True)
         
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択して比較できます）</span>", unsafe_allow_html=True)
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択可）</span>", unsafe_allow_html=True)
         
         selected_docs = []
-        # 絶対に4列でブロックを作成し、上記のCSSが確実に効くようにします
-        num_cols = 4  
         
-        for i in range(0, len(doctors_list), num_cols):
-            cols = st.columns(num_cols)
-            for j in range(num_cols):
-                if i + j < len(doctors_list):
-                    doc = doctors_list[i + j]
-                    if cols[j].checkbox(doc, key=f"hl_chk_{doc}"):
-                        selected_docs.append(doc)
-                        
+        # 列（st.columns）の仕組みを完全に廃止し、シンプルにループで出力するだけ！
+        # これにより、上のCSSの効果でスマホでもPCでも画面の端で勝手に折り返して「ずらずら」並びます。
+        for doc in doctors_list:
+            if st.checkbox(doc, key=f"hl_chk_{doc}"):
+                selected_docs.append(doc)
+                
         st.write("") # 少し余白をあける
         # ▲ 変更ここまで ▲
 
@@ -1107,7 +1108,7 @@ if len(staff_df) > 0:
                         row_result = df_result.iloc[req_d - 1]
                         if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
                             granted += 1
-                        doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
+                doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
             else:
                 doc_data["希望日達成"] = "-"
             
