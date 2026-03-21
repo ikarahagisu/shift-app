@@ -967,31 +967,33 @@ if len(staff_df) > 0:
         st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
         st.write("※右側のメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
-        # 4列のグリッドを作成
-        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
-        
         empty_lbl = "\u200B"
         
-        # ▼ 変更：すべてのテキスト入力欄に autocomplete="off" を追加し、ブラウザの履歴をブロック ▼
+        # ▼ 変更：行（段）ごとに columns を作り直すことで、スマホでもペアが離れないように強制します ▼
+        
         # 1段目
+        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
         hl_yellow = c1.multiselect("🟨 黄色", options=doctors_list, default=[], key="hl_yellow")
         c2.text_input(empty_lbl, label_visibility="hidden", key="memo_y", placeholder="自由記入欄", autocomplete="off")
         hl_red    = c3.multiselect("🟥 赤色", options=doctors_list, default=[], key="hl_red")
         c4.text_input(empty_lbl + " ", label_visibility="hidden", key="memo_r", placeholder="自由記入欄", autocomplete="off")
         
         # 2段目
+        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
         hl_blue   = c1.multiselect("🟦 水色", options=doctors_list, default=[], key="hl_blue")
         c2.text_input(empty_lbl + "  ", label_visibility="hidden", key="memo_b", placeholder="自由記入欄", autocomplete="off")
         hl_green  = c3.multiselect("🟩 緑色", options=doctors_list, default=[], key="hl_green")
         c4.text_input(empty_lbl + "   ", label_visibility="hidden", key="memo_g", placeholder="自由記入欄", autocomplete="off")
         
         # 3段目
+        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
         hl_orange = c1.multiselect("🟧 オレンジ", options=doctors_list, default=[], key="hl_orange")
         c2.text_input(empty_lbl + "    ", label_visibility="hidden", key="memo_o", placeholder="自由記入欄", autocomplete="off")
         hl_brown  = c3.multiselect("🟫 茶色", options=doctors_list, default=[], key="hl_brown")
         c4.text_input(empty_lbl + "     ", label_visibility="hidden", key="memo_br", placeholder="自由記入欄", autocomplete="off")
         
         # 4段目
+        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
         hl_purple = c1.multiselect("🟪 紫色", options=doctors_list, default=[], key="hl_purple")
         c2.text_input(empty_lbl + "      ", label_visibility="hidden", key="memo_p", placeholder="自由記入欄", autocomplete="off")
         hl_pink   = c3.multiselect("💗 ピンク", options=doctors_list, default=[], key="hl_pink")
