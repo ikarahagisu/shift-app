@@ -68,7 +68,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
-    * **【入りにくい曜日(メモ用)】** 「水,木」のように入力しておくと、NGカレンダーでその曜日に ⚠️マーク が表示され、休みたい日を選ぶ際の目印になります。
+    * **【入りにくい曜日】** 「水,木」のように入力しておくと、NGカレンダーでその曜日に ⚠️マーク が表示され、休みたい日を選ぶ際の目印になります。
     * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
@@ -94,7 +94,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 # === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
+/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -106,15 +106,15 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
-    min-width: 0 !important; /* スマホで綺麗に縮むようにする */
+    min-width: 0 !important; 
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; /* トップの余白を固定 */
+    padding: 8px 0px !important; 
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
+    justify-content: flex-start !important; 
     background-color: #ffffff;
     overflow: hidden; 
 }
@@ -139,14 +139,14 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; /* 全文字の行間を統一 */
+    line-height: 1.5 !important; 
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: flex-start !important; /* 上寄せ */
+    align-items: flex-start !important; 
     width: 100% !important;
 }
 
@@ -288,9 +288,10 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
+# ▼ テンプレートの列名を変更 ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
-    "入りにくい曜日(メモ用)": ["水,木", "", "土,日", "", ""],
+    "入りにくい曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
     "NG日(半角カンマ区切り)": ["(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)", "", "", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
@@ -330,8 +331,12 @@ if uploaded_file is not None:
         
     base_df = parse_staff_csv(uploaded_file.getvalue())
     
-    if "入りにくい曜日(メモ用)" not in base_df.columns:
-        base_df.insert(1, "入りにくい曜日(メモ用)", "")
+    # ▼ 列名変更への対応 ▼
+    if "入りにくい曜日(半角カンマ区切り)" not in base_df.columns:
+        if "入りにくい曜日(メモ用)" in base_df.columns:
+            base_df = base_df.rename(columns={"入りにくい曜日(メモ用)": "入りにくい曜日(半角カンマ区切り)"})
+        else:
+            base_df.insert(1, "入りにくい曜日(半角カンマ区切り)", "")
 else:
     base_df = df_template.copy()
 
@@ -342,15 +347,35 @@ if "NG日(半角カンマ区切り)" not in base_df.columns:
     base_df["NG日(半角カンマ区切り)"] = ""
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
-st.write("※以下の表は直接クリックして文字を入力できます。")
+st.write("※以下の表は直接クリックして文字を入力できます。（ヘッダーの列名にマウスを合わせると入力のヒントが出ます）")
 
+# ▼ 画面表示をスリムにするための設定 ▼
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
     use_container_width=True, 
     height=300,
     column_config={
-        "NG日(半角カンマ区切り)": None 
+        "入りにくい曜日(半角カンマ区切り)": st.column_config.TextColumn(
+            "入りにくい曜日",
+            help="例: 水,木 (半角カンマ区切りで入力。カレンダーに⚠️が表示されます)"
+        ),
+        "NG日(半角カンマ区切り)": st.column_config.TextColumn(
+            "NG日",
+            help="(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)"
+        ),
+        "希望日(半角カンマ区切り)": st.column_config.TextColumn(
+            "希望日",
+            help="例: 10, 15 または 10:宿直A (半角カンマ区切りで入力)"
+        ),
+        "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
+            "希望優先度",
+            help="数字が大きいほど優先（100以上で絶対希望）"
+        ),
+        "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
+            "備考",
+            help="メモ・説明など自由記入"
+        )
     }
 )
 
@@ -367,7 +392,8 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(メモ用)", ""))
+            # 列名変更に対応
+            hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(半角カンマ区切り)", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
                 if w in hard_str:
@@ -401,15 +427,13 @@ if not valid_staff.empty:
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には日付の横に ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
 
-                # ▼ 変更：曜日のヘッダー行からは ⚠️マーク を削除しました ▼
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                     cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
                 
-                # 日付とチェックボックス
                 for week in cal_matrix:
                     cols = st.columns(7)
                     for i, day in enumerate(week):
@@ -444,7 +468,6 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
             
-            # 最新の状態を常に staff_df に反映
             current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs_str)
             
