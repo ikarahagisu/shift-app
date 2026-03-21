@@ -960,14 +960,19 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 修正：危険なCSSを全削除し、最も安全でスマホに最適な公式機能「マルチセレクト」を採用 ▼
-        selected_docs = st.multiselect(
-            "🔍 特定の先生のシフトを黄色くハイライト（枠内をタップして複数人を選べます）",
-            options=doctors_list,
-            default=[]
-        )
+        # ▼ 変更：4色（黄色、赤、水色、緑）のマルチセレクトを2列で配置 ▼
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト（枠内をタップして複数人を選べます）</span>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            hl_yellow = st.multiselect("🟨 黄色でハイライト", options=doctors_list, default=[], key="hl_yellow")
+            hl_blue   = st.multiselect("🟦 水色でハイライト", options=doctors_list, default=[], key="hl_blue")
+        with col2:
+            hl_red    = st.multiselect("🟥 赤色でハイライト", options=doctors_list, default=[], key="hl_red")
+            hl_green  = st.multiselect("🟩 緑色でハイライト", options=doctors_list, default=[], key="hl_green")
+            
         st.write("") # 少し余白をあける
-        # ▲ 修正ここまで ▲
+        # ▲ 変更ここまで ▲
 
         def highlight_holidays(row):
             styles = [''] * len(row)
@@ -977,6 +982,7 @@ if len(staff_df) > 0:
                         styles[i] = 'color: #ff4b4b; font-weight: bold;'
             return styles
         
+        # ▼ 変更：それぞれの色に対応したハイライト処理 ▼
         def color_highlighted_doctor(val):
             val_str = str(val)
             if val_str == "-" or val_str == "":
@@ -984,9 +990,16 @@ if len(staff_df) > 0:
             
             cell_docs = [d.strip() for d in re.split(r'[、,]', val_str)]
             
-            for doc in selected_docs:
-                if doc in cell_docs:
-                    return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
+            # 文字が読みやすいように、少しパステルがかった背景色を設定しています
+            for doc in cell_docs:
+                if doc in hl_yellow:
+                    return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ffcc00;'
+                elif doc in hl_red:
+                    return 'background-color: #ffcccc; color: #000000; font-weight: bold; border: 2px solid #ff6666;'
+                elif doc in hl_blue:
+                    return 'background-color: #cce5ff; color: #000000; font-weight: bold; border: 2px solid #66b2ff;'
+                elif doc in hl_green:
+                    return 'background-color: #ccffcc; color: #000000; font-weight: bold; border: 2px solid #66ff66;'
             return ''
         
         base_style = df_result.style.apply(highlight_holidays, axis=1)
