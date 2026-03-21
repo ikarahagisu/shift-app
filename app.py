@@ -68,7 +68,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
-    * **【入りにくい曜日(メモ用)】** 「水,木」のように入力しておくと、NGカレンダーでその曜日が黄色くハイライトされ、休みたい日を選ぶ際の目印になります。
+    * **【入りにくい曜日(メモ用)】** 「水,木」のように入力しておくと、NGカレンダーでその曜日に ⚠️マーク が表示され、休みたい日を選ぶ際の目印になります。
     * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
@@ -94,7 +94,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 # === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
+/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する（スマホで縦積みさせない魔法） */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -106,21 +106,20 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
 /* カレンダーの各マス（セル）のデザイン */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
     width: 100% !important;
-    min-width: 0 !important; 
+    min-width: 0 !important; /* スマホで綺麗に縮むようにする */
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; 
+    padding: 8px 0px !important; /* トップの余白を固定 */
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; 
+    justify-content: flex-start !important; /* 上から詰めてベースラインを揃える */
     background-color: #ffffff;
     overflow: hidden; 
-    transition: background-color 0.2s ease; /* ハイライト時の色変化を滑らかに */
 }
 
-/* Streamlit特有の余計なマージンを消去 */
+/* Streamlit特有の余計なマージンを消去して高さを統一 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) .element-container {
     margin: 0 !important;
     padding: 0 !important;
@@ -140,14 +139,14 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     margin: 0 !important;
     white-space: nowrap !important;
     word-break: keep-all !important; 
-    line-height: 1.5 !important; 
+    line-height: 1.5 !important; /* 全文字の行間を統一 */
 }
 
 /* チェックボックスをセルの真ん中に配置 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
     display: flex;
     justify-content: center !important;
-    align-items: flex-start !important; 
+    align-items: flex-start !important; /* 上寄せ */
     width: 100% !important;
 }
 
@@ -329,8 +328,10 @@ if uploaded_file is not None:
                 del st.session_state[key]
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
-    # 古いCSVへの互換性チェックは削除し、そのまま読み込む
     base_df = parse_staff_csv(uploaded_file.getvalue())
+    
+    if "入りにくい曜日(メモ用)" not in base_df.columns:
+        base_df.insert(1, "入りにくい曜日(メモ用)", "")
 else:
     base_df = df_template.copy()
 
@@ -366,27 +367,11 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # ▼ CSSスコープ用のマーカーをタブ直下に配置し、確実にハイライトを効かせる ▼
-            st.markdown(f'<div class="marker-tab-{t_idx}" style="display:none;"></div>', unsafe_allow_html=True)
-            
             hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(メモ用)", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
                 if w in hard_str:
                     hard_days.append(i)
-            
-            # ▼ タブパネル（div[role="tabpanel"] または div[data-testid="stTab"]）に絞って色を塗る！ ▼
-            if hard_days:
-                css_rules = ""
-                for hd in hard_days:
-                    css_rules += f'''
-                    div[role="tabpanel"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}),
-                    div[data-testid="stTab"]:has(.marker-tab-{t_idx}) div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"]:nth-child({hd+1}) {{
-                        background-color: #fff9c4 !important;
-                        border-color: #fde047 !important;
-                    }}
-                    '''
-                st.markdown(f"<style>{css_rules}</style>", unsafe_allow_html=True)
 
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
@@ -416,15 +401,18 @@ if not valid_staff.empty:
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 st.write(f"※カレンダーで休みたい日を複数選んだ後、最後に必ず下の赤い**【✨ {doc_name}先生のNG日を確定する】**ボタンを押して保存してください。")
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」が黄色くハイライトされています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
 
-                # 曜日のヘッダー行
+                # ▼ 修正：曜日のヘッダーに直接スタイルを注入して確実に色を付けます ▼
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+                    is_hard = i in hard_days
+                    bg_css = "background-color: #fff9c4; border-radius: 4px;" if is_hard else ""
+                    warning_mark = "⚠️" if is_hard else ""
+                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px; {bg_css}'>{w} {warning_mark}</div>", unsafe_allow_html=True)
                 
-                # 日付とチェックボックス
+                # ▼ 修正：日付にも直接⚠️マークを付けます ▼
                 for week in cal_matrix:
                     cols = st.columns(7)
                     for i, day in enumerate(week):
@@ -432,18 +420,22 @@ if not valid_staff.empty:
                             date_obj = datetime.date(year, month, day)
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                            is_hard = i in hard_days
                             
-                            if is_hol_or_sun:
-                                day_label = f":red[**{day}日**]"
-                            elif is_sat:
-                                day_label = f":blue[**{day}日**]"
-                            else:
-                                day_label = f"**{day}日**"
-                                
-                            chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                            warning_mark = "⚠️" if is_hard else ""
                             
                             with cols[i]:
-                                st.checkbox(day_label, key=chk_key)
+                                if is_hol_or_sun:
+                                    bg_css = "background-color: #fff9c4; border-radius: 4px;" if is_hard else ""
+                                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b; padding-top: 7px; {bg_css}'><b style='font-weight: 600;'>{day}日 {warning_mark}</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
+                                else:
+                                    if is_sat:
+                                        day_label = f":blue[**{day}日**] {warning_mark}"
+                                    else:
+                                        day_label = f"**{day}日** {warning_mark}"
+                                        
+                                    chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                                    st.checkbox(day_label, key=chk_key)
                         else:
                             with cols[i]:
                                 st.write("")
@@ -644,9 +636,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
-        
-        # ▼ 古いデータ対策を削除し、そのまま読み込む ▼
-        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 2)
+        max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
 
         max_shifts_per_type[doc] = {
             '宿直A': safe_int(row.get('宿直A上限'), 2),
