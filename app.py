@@ -965,38 +965,59 @@ if len(staff_df) > 0:
         
         st.divider()
         st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
-        st.write("※右側のメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
+        st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
-        # 4列のグリッドを作成
-        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
-        
-        empty_lbl = "\u200B"
+        # ▼ 変更：「横並び」をやめて、マルチセレクトの真下にメモをくっつけてグループ化 ▼
         
         # 1段目
-        hl_yellow = c1.multiselect("🟨 黄色", options=doctors_list, default=[], key="hl_yellow")
-        c2.text_input(empty_lbl, label_visibility="hidden", key="memo_y", placeholder="自由記入欄", autocomplete="off")
-        hl_red    = c3.multiselect("🟥 赤色", options=doctors_list, default=[], key="hl_red")
-        c4.text_input(empty_lbl + " ", label_visibility="hidden", key="memo_r", placeholder="自由記入欄", autocomplete="off")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟨 **黄色**")
+            hl_yellow = st.multiselect("黄色", options=doctors_list, default=[], key="hl_yellow", label_visibility="collapsed")
+            st.text_input("黄色メモ", key="memo_y", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟥 **赤色**")
+            hl_red = st.multiselect("赤色", options=doctors_list, default=[], key="hl_red", label_visibility="collapsed")
+            st.text_input("赤色メモ", key="memo_r", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
         
         # 2段目
-        hl_blue   = c1.multiselect("🟦 水色", options=doctors_list, default=[], key="hl_blue")
-        c2.text_input(empty_lbl + "  ", label_visibility="hidden", key="memo_b", placeholder="自由記入欄", autocomplete="off")
-        hl_green  = c3.multiselect("🟩 緑色", options=doctors_list, default=[], key="hl_green")
-        c4.text_input(empty_lbl + "   ", label_visibility="hidden", key="memo_g", placeholder="自由記入欄", autocomplete="off")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟦 **水色**")
+            hl_blue = st.multiselect("水色", options=doctors_list, default=[], key="hl_blue", label_visibility="collapsed")
+            st.text_input("水色メモ", key="memo_b", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟩 **緑色**")
+            hl_green = st.multiselect("緑色", options=doctors_list, default=[], key="hl_green", label_visibility="collapsed")
+            st.text_input("緑色メモ", key="memo_g", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
         
         # 3段目
-        hl_orange = c1.multiselect("🟧 オレンジ", options=doctors_list, default=[], key="hl_orange")
-        c2.text_input(empty_lbl + "    ", label_visibility="hidden", key="memo_o", placeholder="自由記入欄", autocomplete="off")
-        hl_brown  = c3.multiselect("🟫 茶色", options=doctors_list, default=[], key="hl_brown")
-        c4.text_input(empty_lbl + "     ", label_visibility="hidden", key="memo_br", placeholder="自由記入欄", autocomplete="off")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟧 **オレンジ**")
+            hl_orange = st.multiselect("オレンジ", options=doctors_list, default=[], key="hl_orange", label_visibility="collapsed")
+            st.text_input("オレンジメモ", key="memo_o", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟫 **茶色**")
+            hl_brown = st.multiselect("茶色", options=doctors_list, default=[], key="hl_brown", label_visibility="collapsed")
+            st.text_input("茶色メモ", key="memo_br", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
         
         # 4段目
-        hl_purple = c1.multiselect("🟪 紫色", options=doctors_list, default=[], key="hl_purple")
-        c2.text_input(empty_lbl + "      ", label_visibility="hidden", key="memo_p", placeholder="自由記入欄", autocomplete="off")
-        hl_pink   = c3.multiselect("💗 ピンク", options=doctors_list, default=[], key="hl_pink")
-        c4.text_input(empty_lbl + "       ", label_visibility="hidden", key="memo_pi", placeholder="自由記入欄", autocomplete="off")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟪 **紫色**")
+            hl_purple = st.multiselect("紫色", options=doctors_list, default=[], key="hl_purple", label_visibility="collapsed")
+            st.text_input("紫色メモ", key="memo_p", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("💗 **ピンク**")
+            hl_pink = st.multiselect("ピンク", options=doctors_list, default=[], key="hl_pink", label_visibility="collapsed")
+            st.text_input("ピンクメモ", key="memo_pi", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
             
         st.write("") # 少し余白をあける
+        # ▲ 変更ここまで ▲
 
         def highlight_holidays(row):
             styles = [''] * len(row)
@@ -1041,7 +1062,7 @@ if len(staff_df) > 0:
         
         result_height = len(df_result) * 35 + 40
         
-        # ▼ 元の「表示専用の表（st.dataframe）」に戻しました ▼
+        # 予約しておいた「table_container」の場所に、色付けが完了した表を描画する
         with table_container:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
@@ -1074,7 +1095,6 @@ if len(staff_df) > 0:
                             except:
                                 pass
         
-        # ▼ 以下の計算も、元の df_result を参照するように戻しました ▼
         for doc in doctors_list:
             doc_data = {"先生の名前": doc}
             total_count = 0
