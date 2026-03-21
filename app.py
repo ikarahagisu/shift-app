@@ -960,28 +960,40 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 変更：表を描画する場所をここで「予約」しておく ▼
+        # 表を描画する場所をここで「予約」しておく
         table_container = st.container()
         
-        # ▼ 変更：ハイライトの設定欄をシフト表の下に移動 ▼
+        # ▼ 変更：各色のすぐ横にメモ欄を配置するレイアウト ▼
         st.divider()
         st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
-        st.write("※下で選んだ色が、上のシフト表にリアルタイムで反映されます。")
+        st.write("※右側のメモ欄に「指導医」「1年目」など自由に書き込めます。（計算には影響しません）")
         
-        # 追加：ただ文字を入れられるだけのメモ欄（システムの計算には何も影響しません）
-        st.text_input("📝 ハイライトの項目名・メモ（自由に文字を入力できます）", placeholder="例：黄色＝指導医、赤色＝新人 など", key="hl_memo")
+        # 4列のグリッドを作成（色選択、メモ、色選択、メモ）
+        c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
         
-        col1, col2 = st.columns(2)
-        with col1:
-            hl_yellow = st.multiselect("🟨 黄色でハイライト", options=doctors_list, default=[], key="hl_yellow")
-            hl_blue   = st.multiselect("🟦 水色でハイライト", options=doctors_list, default=[], key="hl_blue")
-            hl_orange = st.multiselect("🟧 オレンジでハイライト", options=doctors_list, default=[], key="hl_orange")
-            hl_purple = st.multiselect("🟪 紫色でハイライト", options=doctors_list, default=[], key="hl_purple")
-        with col2:
-            hl_red    = st.multiselect("🟥 赤色でハイライト", options=doctors_list, default=[], key="hl_red")
-            hl_green  = st.multiselect("🟩 緑色でハイライト", options=doctors_list, default=[], key="hl_green")
-            hl_brown  = st.multiselect("🟫 茶色でハイライト", options=doctors_list, default=[], key="hl_brown")
-            hl_pink   = st.multiselect("💗 ピンクでハイライト", options=doctors_list, default=[], key="hl_pink")
+        # 1段目
+        hl_yellow = c1.multiselect("🟨 黄色", options=doctors_list, default=[], key="hl_yellow")
+        c2.text_input("📝 メモ", key="memo_y", placeholder="例：指導医")
+        hl_red    = c3.multiselect("🟥 赤色", options=doctors_list, default=[], key="hl_red")
+        c4.text_input("📝 メモ", key="memo_r", placeholder="例：研修医")
+        
+        # 2段目
+        hl_blue   = c1.multiselect("🟦 水色", options=doctors_list, default=[], key="hl_blue")
+        c2.text_input("📝 メモ", key="memo_b", placeholder="チーム名など")
+        hl_green  = c3.multiselect("🟩 緑色", options=doctors_list, default=[], key="hl_green")
+        c4.text_input("📝 メモ", key="memo_g", placeholder="自由に記入")
+        
+        # 3段目
+        hl_orange = c1.multiselect("🟧 オレンジ", options=doctors_list, default=[], key="hl_orange")
+        c2.text_input("📝 メモ", key="memo_o", placeholder="自由に記入")
+        hl_brown  = c3.multiselect("🟫 茶色", options=doctors_list, default=[], key="hl_brown")
+        c4.text_input("📝 メモ", key="memo_br", placeholder="自由に記入")
+        
+        # 4段目
+        hl_purple = c1.multiselect("🟪 紫色", options=doctors_list, default=[], key="hl_purple")
+        c2.text_input("📝 メモ", key="memo_p", placeholder="自由に記入")
+        hl_pink   = c3.multiselect("💗 ピンク", options=doctors_list, default=[], key="hl_pink")
+        c4.text_input("📝 メモ", key="memo_pi", placeholder="自由に記入")
             
         st.write("") # 少し余白をあける
         # ▲ 変更ここまで ▲
@@ -1029,7 +1041,7 @@ if len(staff_df) > 0:
         
         result_height = len(df_result) * 35 + 40
         
-        # ▼ 変更：予約しておいた「table_container」の場所に、色付けが完了した表を描画する ▼
+        # 予約しておいた「table_container」の場所に、色付けが完了した表を描画する
         with table_container:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
