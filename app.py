@@ -344,14 +344,12 @@ if "先生の名前" in base_df.columns:
 if "NG日(半角カンマ区切り)" not in base_df.columns:
     base_df["NG日(半角カンマ区切り)"] = ""
 
-# ▼ 【エラー回避策】読み込んだCSVのデータを安全な型に強制変換する処理 ▼
 if "希望優先度(数字が大きいほど優先)" in base_df.columns:
     base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
 
 text_cols = ["入りにくい曜日(半角カンマ区切り)", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
 for c in text_cols:
     if c in base_df.columns:
-        # 空白や不要な「nan」文字を消して、確実に文字列として扱う
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
@@ -440,6 +438,7 @@ if not valid_staff.empty:
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                     cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
                 
+                # ▼ 修正：休日や日曜日にもチェックボックス(st.checkbox)を正しく表示させます ▼
                 for week in cal_matrix:
                     cols = st.columns(7)
                     for i, day in enumerate(week):
@@ -453,15 +452,14 @@ if not valid_staff.empty:
                             
                             with cols[i]:
                                 if is_hol_or_sun:
-                                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b; padding-top: 7px;'><b style='font-weight: 600;'>{day}日 {warning_mark}</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
+                                    day_label = f":red[**{day}日**] {warning_mark}"
+                                elif is_sat:
+                                    day_label = f":blue[**{day}日**] {warning_mark}"
                                 else:
-                                    if is_sat:
-                                        day_label = f":blue[**{day}日**] {warning_mark}"
-                                    else:
-                                        day_label = f"**{day}日** {warning_mark}"
-                                        
-                                    chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                                    st.checkbox(day_label, key=chk_key)
+                                    day_label = f"**{day}日** {warning_mark}"
+                                    
+                                chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                                st.checkbox(day_label, key=chk_key)
                         else:
                             with cols[i]:
                                 st.write("")
