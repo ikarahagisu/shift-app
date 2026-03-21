@@ -937,6 +937,10 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
             if success:
                 st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
                 
+                shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
+                doctors_list = staff_df['先生の名前'].astype(str).tolist()
+                
+                # 休日の文字色を赤にする関数
                 def highlight_holidays(row):
                     styles = [''] * len(row)
                     if row['平日/休日'] == '休日':
@@ -945,16 +949,48 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
-                styled_df = df_result.style.apply(highlight_holidays, axis=1)
+                # ▼ 追加：医師ごとの背景色を塗る関数 ▼
+                # 目に優しいパステルカラーのリスト
+                pastel_colors = [
+                    '#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', 
+                    '#a0c4ff', '#bdb2ff', '#ffc6ff', '#ffdfba', '#fbc4ab',
+                    '#d4a373', '#e9edc9', '#fefae0', '#faedcb', '#c9e4de'
+                ]
+                # 先生ごとに色を割り当て
+                doc_colors = {doc: pastel_colors[i % len(pastel_colors)] for i, doc in enumerate(doctors_list)}
+                
+                def color_doctors(val):
+                    val_str = str(val)
+                    if val_str == "-" or val_str == "":
+                        return ''
+                    for doc, color in doc_colors.items():
+                        if doc in val_str:
+                            # 先生の名前が含まれていれば背景色を適用（文字は読みやすい黒固定）
+                            return f'background-color: {color}; color: #000000; font-weight: 500;'
+                    return ''
+                
+                # Pandasのバージョンによる互換性エラーを防ぐ処理
+                base_style = df_result.style.apply(highlight_holidays, axis=1)
+                if hasattr(base_style, 'map'):
+                    styled_df = base_style.map(color_doctors, subset=shift_columns)
+                else:
+                    styled_df = base_style.applymap(color_doctors, subset=shift_columns)
+                # ▲ 追加ここまで ▲
                 
                 st.subheader("📅 完成したシフト表")
+                
+                # ▼ 追加：誰がどの色かを示す凡例（レジェンド）の表示 ▼
+                legend_html = "<div style='display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;'>"
+                for doc, color in doc_colors.items():
+                    legend_html += f"<div style='display: flex; align-items: center; gap: 4px;'><div style='width: 16px; height: 16px; background-color: {color}; border: 1px solid #ccc; border-radius: 3px;'></div><span style='font-size: 0.9rem;'>{doc}</span></div>"
+                legend_html += "</div>"
+                st.markdown(legend_html, unsafe_allow_html=True)
+                
                 result_height = len(df_result) * 35 + 40
                 st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
                 
                 st.subheader("📊 先生ごとのシフト回数（実績）")
-                shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
                 summary_list = []
-                doctors_list = staff_df['先生の名前'].astype(str).tolist()
                 
                 req_days_eval = {}
                 req_spec_eval = {}
@@ -1010,7 +1046,6 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         total_count += count
                         hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                                 
-                    # ▼ 追加・修正：宿直合計、日直合計、列名の変更 ▼
                     doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
                     doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
                     doc_data["休日回数"] = hol_count
@@ -1041,7 +1076,6 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                     summary_list.append(doc_data)
                     
                 df_summary = pd.DataFrame(summary_list)
-                # ▼ 修正：列の並び順に「宿直回数」「日直回数」を挿入し、列名を反映 ▼
                 df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
                 
                 df_summary = df_summary.set_index('先生の名前')
