@@ -959,100 +959,40 @@ if len(staff_df) > 0:
         doctors_list = staff_df['先生の名前'].astype(str).tolist()
         
         st.subheader("📅 完成したシフト表")
-        st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 先生の名前にカーソルを合わせる（スマホはタップする）と、その先生のシフトが全てハイライトされます！</span>", unsafe_allow_html=True)
-
-        # ▼ 追加：カーソルを乗せたとき「だけ」光る、独自のHTMLカレンダーを生成 ▼
-        css = """
-        <style>
-        .shift-container {
-            width: 100%;
-            overflow-x: auto;
-            margin-bottom: 20px;
-        }
-        .shift-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.9rem;
-            background-color: #ffffff;
-            border: 1px solid #e6e6e6;
-        }
-        .shift-table th, .shift-table td {
-            border: 1px solid #e6e6e6;
-            padding: 8px 4px;
-            text-align: center;
-            vertical-align: middle;
-            white-space: nowrap;
-        }
-        .shift-table th {
-            background-color: #f0f2f6;
-            color: #31333F;
-            font-weight: 600;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-        }
-        .holiday-text {
-            color: #ff4b4b;
-            font-weight: bold;
-        }
-        .doc-span {
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: all 0.15s ease-in-out;
-            display: inline-block;
-            cursor: pointer;
-        }
-        """
-        # 先生ごとに固有のCSSクラスを作成し、hover時に同じクラスを黄色にする
-        for idx, doc in enumerate(doctors_list):
-            cls = f"doc_{idx}"
-            css += f"""
-            .shift-container:has(.{cls}:hover) .{cls} {{
-                background-color: #fff200 !important;
-                color: #000000 !important;
-                font-weight: bold !important;
-                transform: scale(1.1);
-                box-shadow: 0 0 8px rgba(255, 242, 0, 0.8);
-                z-index: 2;
-                position: relative;
-            }}
-            """
-        css += "</style>"
-
-        # HTMLを組み立てる
-        html = f'<div class="shift-container">{css}<table class="shift-table">'
-        html += "<thead><tr>"
-        for col in df_result.columns:
-            html += f"<th>{col}</th>"
-        html += "</tr></thead><tbody>"
-
-        for _, row in df_result.iterrows():
-            is_holiday = row['平日/休日'] == '休日'
-            tr_class = "holiday-text" if is_holiday else ""
-            html += f"<tr class='{tr_class}'>"
-            for col in df_result.columns:
-                val = str(row[col])
-                if val in ["-", ""]:
-                    html += "<td>-</td>"
-                elif col in ['日付', '平日/休日']:
-                    html += f"<td>{val}</td>"
-                else:
-                    docs = [d.strip() for d in re.split(r'[、,]', val)]
-                    spans = []
-                    for d in docs:
-                        if d in doctors_list:
-                            cls = f"doc_{doctors_list.index(d)}"
-                            spans.append(f"<span class='doc-span {cls}'>{d}</span>")
-                        else:
-                            spans.append(d)
-                    html += f"<td>{'、'.join(spans)}</td>"
-            html += "</tr>"
-        html += "</tbody></table></div>"
-
-        # Streamlit上にHTMLカレンダーを描画
-        st.markdown(html, unsafe_allow_html=True)
         
-        # 実績表の集計はそのまま
+        # ▼ 復活＆改善：ドロップダウン方式（エラーにならず最も確実です） ▼
+        col_sel, _ = st.columns([2, 3])
+        with col_sel:
+            highlight_doc = st.selectbox(
+                "🔍 特定の先生のシフトを黄色くハイライト",
+                options=["（ハイライトなし）"] + doctors_list,
+                index=0
+            )
+        
+        def highlight_holidays(row):
+            styles = [''] * len(row)
+            if row['平日/休日'] == '休日':
+                for i, col in enumerate(row.index):
+                    if col in ['日付', '平日/休日']: 
+                        styles[i] = 'color: #ff4b4b; font-weight: bold;'
+            return styles
+        
+        def color_highlighted_doctor(val):
+            val_str = str(val)
+            if highlight_doc != "（ハイライトなし）" and highlight_doc in val_str:
+                return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
+            return ''
+        
+        base_style = df_result.style.apply(highlight_holidays, axis=1)
+        
+        if hasattr(base_style, 'map'):
+            styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
+        else:
+            styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
+        
+        result_height = len(df_result) * 35 + 40
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
+        
         st.subheader("📊 先生ごとのシフト回数（実績）")
         summary_list = []
         
