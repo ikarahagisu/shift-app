@@ -291,7 +291,7 @@ st.header("1. スタッフ条件の読み込み・入力（必須）")
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "入りにくい曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
-    "NG日(半角カンマ区切り)": ["(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)", "", "", "", ""],
+    "NG日(半角カンマ区切り)": ["", "", "", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
@@ -329,21 +329,13 @@ if uploaded_file is not None:
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
     base_df = parse_staff_csv(uploaded_file.getvalue())
-    
-    if "入りにくい曜日(半角カンマ区切り)" not in base_df.columns:
-        if "入りにくい曜日(メモ用)" in base_df.columns:
-            base_df = base_df.rename(columns={"入りにくい曜日(メモ用)": "入りにくい曜日(半角カンマ区切り)"})
-        else:
-            base_df.insert(1, "入りにくい曜日(半角カンマ区切り)", "")
 else:
     base_df = df_template.copy()
 
 if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
-if "NG日(半角カンマ区切り)" not in base_df.columns:
-    base_df["NG日(半角カンマ区切り)"] = ""
-
+# エラー対策：データ型の統一
 if "希望優先度(数字が大きいほど優先)" in base_df.columns:
     base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
 
@@ -365,10 +357,7 @@ edited_df = st.data_editor(
             "入りにくい曜日",
             help="例: 水,木 (半角カンマ区切りで入力。カレンダーに⚠️が表示されます)"
         ),
-        "NG日(半角カンマ区切り)": st.column_config.TextColumn(
-            "NG日",
-            help="(WEB画面でのカレンダー入力が圧倒的に楽なのでオススメです)"
-        ),
+        "NG日(半角カンマ区切り)": None, 
         "希望日(半角カンマ区切り)": st.column_config.TextColumn(
             "希望日",
             help="例: 10, 15 または 10:宿直A (半角カンマ区切りで入力)"
@@ -438,7 +427,6 @@ if not valid_staff.empty:
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                     cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
                 
-                # ▼ 修正：休日や日曜日にもチェックボックス(st.checkbox)を正しく表示させます ▼
                 for week in cal_matrix:
                     cols = st.columns(7)
                     for i, day in enumerate(week):
