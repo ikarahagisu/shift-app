@@ -963,37 +963,40 @@ if len(staff_df) > 0:
         # 表を描画する場所をここで「予約」しておく
         table_container = st.container()
         
-        # ▼ 変更：テキストの修正とメモラベルの非表示化 ▼
         st.divider()
         st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
+        # ▼ 指定通りの説明文に変更 ▼
         st.write("※右側のメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
-        # 4列のグリッドを作成（色選択、メモ、色選択、メモ）
+        # 4列のグリッドを作成
         c1, c2, c3, c4 = st.columns([3, 1.5, 3, 1.5])
+        
+        # ▼ 変更：ラベルを「透明な文字（ゼロ幅スペース）」にしてポップアップを完全に無効化 ▼
+        empty_lbl = "\u200B"
         
         # 1段目
         hl_yellow = c1.multiselect("🟨 黄色", options=doctors_list, default=[], key="hl_yellow")
-        c2.text_input("メモ1", label_visibility="hidden", key="memo_y", placeholder="自由記入欄")
+        c2.text_input(empty_lbl, label_visibility="hidden", key="memo_y", placeholder="自由記入欄")
         hl_red    = c3.multiselect("🟥 赤色", options=doctors_list, default=[], key="hl_red")
-        c4.text_input("メモ2", label_visibility="hidden", key="memo_r", placeholder="自由記入欄")
+        c4.text_input(empty_lbl + " ", label_visibility="hidden", key="memo_r", placeholder="自由記入欄")
         
         # 2段目
         hl_blue   = c1.multiselect("🟦 水色", options=doctors_list, default=[], key="hl_blue")
-        c2.text_input("メモ3", label_visibility="hidden", key="memo_b", placeholder="自由記入欄")
+        c2.text_input(empty_lbl + "  ", label_visibility="hidden", key="memo_b", placeholder="自由記入欄")
         hl_green  = c3.multiselect("🟩 緑色", options=doctors_list, default=[], key="hl_green")
-        c4.text_input("メモ4", label_visibility="hidden", key="memo_g", placeholder="自由記入欄")
+        c4.text_input(empty_lbl + "   ", label_visibility="hidden", key="memo_g", placeholder="自由記入欄")
         
         # 3段目
         hl_orange = c1.multiselect("🟧 オレンジ", options=doctors_list, default=[], key="hl_orange")
-        c2.text_input("メモ5", label_visibility="hidden", key="memo_o", placeholder="自由記入欄")
+        c2.text_input(empty_lbl + "    ", label_visibility="hidden", key="memo_o", placeholder="自由記入欄")
         hl_brown  = c3.multiselect("🟫 茶色", options=doctors_list, default=[], key="hl_brown")
-        c4.text_input("メモ6", label_visibility="hidden", key="memo_br", placeholder="自由記入欄")
+        c4.text_input(empty_lbl + "     ", label_visibility="hidden", key="memo_br", placeholder="自由記入欄")
         
         # 4段目
         hl_purple = c1.multiselect("🟪 紫色", options=doctors_list, default=[], key="hl_purple")
-        c2.text_input("メモ7", label_visibility="hidden", key="memo_p", placeholder="自由記入欄")
+        c2.text_input(empty_lbl + "      ", label_visibility="hidden", key="memo_p", placeholder="自由記入欄")
         hl_pink   = c3.multiselect("💗 ピンク", options=doctors_list, default=[], key="hl_pink")
-        c4.text_input("メモ8", label_visibility="hidden", key="memo_pi", placeholder="自由記入欄")
+        c4.text_input(empty_lbl + "       ", label_visibility="hidden", key="memo_pi", placeholder="自由記入欄")
             
         st.write("") # 少し余白をあける
         # ▲ 変更ここまで ▲
