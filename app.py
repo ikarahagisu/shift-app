@@ -940,7 +940,6 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                 shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
                 doctors_list = staff_df['先生の名前'].astype(str).tolist()
                 
-                # 休日の文字色を赤にする関数
                 def highlight_holidays(row):
                     styles = [''] * len(row)
                     if row['平日/休日'] == '休日':
@@ -949,15 +948,25 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                                 styles[i] = 'color: #ff4b4b; font-weight: bold;'
                     return styles
                 
-                # ▼ 追加：医師ごとの背景色を塗る関数 ▼
-                # 目に優しいパステルカラーのリスト
-                pastel_colors = [
-                    '#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', 
-                    '#a0c4ff', '#bdb2ff', '#ffc6ff', '#ffdfba', '#fbc4ab',
-                    '#d4a373', '#e9edc9', '#fefae0', '#faedcb', '#c9e4de'
+                # ▼ 変更：誰が見てもはっきりと区別がつく、鮮やかな色のパレットに変更 ▼
+                distinct_colors = [
+                    '#FF99CC', # 濃いめのピンク
+                    '#99CCFF', # はっきりした青
+                    '#99FF99', # はっきりした緑
+                    '#FFFF66', # 濃いめの黄色
+                    '#FFCC66', # オレンジ
+                    '#CC99FF', # 紫
+                    '#FF99FF', # マゼンタ
+                    '#66FFFF', # シアン
+                    '#FF6666', # 赤
+                    '#66FFCC', # 青緑
+                    '#CCCC00', # オリーブ
+                    '#00CCFF', # 濃い水色
+                    '#FF9966', # コーラル
+                    '#CC66FF', # 濃い紫
+                    '#999900'  # 暗い黄色
                 ]
-                # 先生ごとに色を割り当て
-                doc_colors = {doc: pastel_colors[i % len(pastel_colors)] for i, doc in enumerate(doctors_list)}
+                doc_colors = {doc: distinct_colors[i % len(distinct_colors)] for i, doc in enumerate(doctors_list)}
                 
                 def color_doctors(val):
                     val_str = str(val)
@@ -965,21 +974,17 @@ if len(staff_df) > 0 and st.button("🚀 このデータでシフトを自動生
                         return ''
                     for doc, color in doc_colors.items():
                         if doc in val_str:
-                            # 先生の名前が含まれていれば背景色を適用（文字は読みやすい黒固定）
                             return f'background-color: {color}; color: #000000; font-weight: 500;'
                     return ''
                 
-                # Pandasのバージョンによる互換性エラーを防ぐ処理
                 base_style = df_result.style.apply(highlight_holidays, axis=1)
                 if hasattr(base_style, 'map'):
                     styled_df = base_style.map(color_doctors, subset=shift_columns)
                 else:
                     styled_df = base_style.applymap(color_doctors, subset=shift_columns)
-                # ▲ 追加ここまで ▲
                 
                 st.subheader("📅 完成したシフト表")
                 
-                # ▼ 追加：誰がどの色かを示す凡例（レジェンド）の表示 ▼
                 legend_html = "<div style='display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;'>"
                 for doc, color in doc_colors.items():
                     legend_html += f"<div style='display: flex; align-items: center; gap: 4px;'><div style='width: 16px; height: 16px; background-color: {color}; border: 1px solid #ccc; border-radius: 3px;'></div><span style='font-size: 0.9rem;'>{doc}</span></div>"
