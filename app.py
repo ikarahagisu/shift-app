@@ -960,40 +960,50 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 変更：列(columns)を使わず、チェックボックスを「文字」のように横にずらずら流し込む魔法のCSS ▼
+        # ▼ 変更：文章のように横にずらずら並べる（インライン折り返し）専用UI ▼
         st.markdown("""
         <style>
-        /* 全てのチェックボックスのブロックをインライン（横並び）にする */
-        div.element-container:has(div[data-testid="stCheckbox"]) {
-            display: inline-block !important;
-            width: auto !important;
-            margin-right: 15px !important;
-            margin-bottom: 5px !important;
-        }
-        /* チェックボックス自体の幅を文字数に合わせる */
-        div[data-testid="stCheckbox"] {
-            width: auto !important;
-        }
-        /* ただし、上の「カレンダー（7列）」の中にあるチェックボックスだけは、カレンダーのレイアウトを維持するために除外（上書き）する */
-        div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div.element-container:has(div[data-testid="stCheckbox"]) {
+        /* highlight-containerを含むブロック（st.container）を横並びのFlexboxに変更 */
+        div[data-testid="stVerticalBlock"]:has(.highlight-container) {
             display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: wrap !important; /* 端まで来たら自動で折り返す */
+            align-items: center !important;
+            gap: 0px 15px !important; /* 上下左右のチェックボックス間の余白 */
+            padding: 15px;
+            background-color: #f8f9fa; /* 薄いグレーの枠で囲む */
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        /* コンテナ内のすべての要素（チェックボックス）を文字のように自動幅にする */
+        div[data-testid="stVerticalBlock"]:has(.highlight-container) > div {
+            width: auto !important;
+            min-width: 0 !important;
+            flex: 0 0 auto !important;
+        }
+        /* 2番目の要素（タイトル文字）だけは幅100%にして、その下からチェックボックスを並べる */
+        div[data-testid="stVerticalBlock"]:has(.highlight-container) > div:nth-child(2) {
             width: 100% !important;
-            margin-right: 0 !important;
+            flex: 0 0 100% !important;
+            margin-bottom: 8px !important;
         }
         </style>
         """, unsafe_allow_html=True)
         
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択可）</span>", unsafe_allow_html=True)
-        
-        selected_docs = []
-        
-        # 列（st.columns）の仕組みを完全に廃止し、シンプルにループで出力するだけ！
-        # これにより、上のCSSの効果でスマホでもPCでも画面の端で勝手に折り返して「ずらずら」並びます。
-        for doc in doctors_list:
-            if st.checkbox(doc, key=f"hl_chk_{doc}"):
-                selected_docs.append(doc)
-                
-        st.write("") # 少し余白をあける
+        # 専用のコンテナを用意
+        with st.container():
+            # 1. CSSを反応させるための目印（透明なHTML）
+            st.markdown('<div class="highlight-container"></div>', unsafe_allow_html=True)
+            # 2. タイトル（ここで自動的に改行されます）
+            st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択可）</span>", unsafe_allow_html=True)
+            
+            selected_docs = []
+            # 3. 以降のチェックボックスは横にずらずら並び、画面端で自動的に折り返します
+            for doc in doctors_list:
+                if st.checkbox(doc, key=f"hl_chk_{doc}"):
+                    selected_docs.append(doc)
+                    
+        st.write("") # 表との間に少し余白をあける
         # ▲ 変更ここまで ▲
 
         def highlight_holidays(row):
@@ -1009,10 +1019,8 @@ if len(staff_df) > 0:
             if val_str == "-" or val_str == "":
                 return ''
             
-            # セルの中に複数人の先生が入っている場合を考慮して分割
             cell_docs = [d.strip() for d in re.split(r'[、,]', val_str)]
             
-            # 選択された先生がこのセルにいれば黄色くハイライト
             for doc in selected_docs:
                 if doc in cell_docs:
                     return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
