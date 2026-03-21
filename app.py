@@ -960,19 +960,22 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 変更：ドロップダウンをやめ、チェックボックスを横に並べるUIに変更 ▼
+        # ▼ 変更：スマホで順番が崩れないように「行ごと」にカラムを作成する方式に変更 ▼
         st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択して比較できます）</span>", unsafe_allow_html=True)
         
         selected_docs = []
-        # 40名以上の先生がいても画面が縦に長くなりすぎないよう、5列のグリッドに配置します
-        num_cols = 5
-        cols = st.columns(num_cols)
+        num_cols = 5  # PC表示時の列数
         
-        for i, doc in enumerate(doctors_list):
-            # チェックが入った先生をリストに追加
-            if cols[i % num_cols].checkbox(doc, key=f"hl_chk_{doc}"):
-                selected_docs.append(doc)
-        
+        # 先生のリストを5人ずつ区切って「行」を作り、その中にカラムを配置する
+        for i in range(0, len(doctors_list), num_cols):
+            cols = st.columns(num_cols)
+            for j in range(num_cols):
+                if i + j < len(doctors_list):
+                    doc = doctors_list[i + j]
+                    # これでスマホで縦に並んでも元のCSV通りの順番が完全に維持されます
+                    if cols[j].checkbox(doc, key=f"hl_chk_{doc}"):
+                        selected_docs.append(doc)
+                        
         st.write("") # 少し余白をあける
         # ▲ 変更ここまで ▲
 
