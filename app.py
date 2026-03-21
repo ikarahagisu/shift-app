@@ -960,15 +960,22 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 復活＆改善：ドロップダウン方式（エラーにならず最も確実です） ▼
-        col_sel, _ = st.columns([2, 3])
-        with col_sel:
-            highlight_doc = st.selectbox(
-                "🔍 特定の先生のシフトを黄色くハイライト",
-                options=["（ハイライトなし）"] + doctors_list,
-                index=0
-            )
+        # ▼ 変更：ドロップダウンをやめ、チェックボックスを横に並べるUIに変更 ▼
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを黄色くハイライト（複数選択して比較できます）</span>", unsafe_allow_html=True)
         
+        selected_docs = []
+        # 40名以上の先生がいても画面が縦に長くなりすぎないよう、5列のグリッドに配置します
+        num_cols = 5
+        cols = st.columns(num_cols)
+        
+        for i, doc in enumerate(doctors_list):
+            # チェックが入った先生をリストに追加
+            if cols[i % num_cols].checkbox(doc, key=f"hl_chk_{doc}"):
+                selected_docs.append(doc)
+        
+        st.write("") # 少し余白をあける
+        # ▲ 変更ここまで ▲
+
         def highlight_holidays(row):
             styles = [''] * len(row)
             if row['平日/休日'] == '休日':
@@ -979,8 +986,16 @@ if len(staff_df) > 0:
         
         def color_highlighted_doctor(val):
             val_str = str(val)
-            if highlight_doc != "（ハイライトなし）" and highlight_doc in val_str:
-                return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
+            if val_str == "-" or val_str == "":
+                return ''
+            
+            # セルの中に複数人の先生が入っている場合を考慮して分割
+            cell_docs = [d.strip() for d in re.split(r'[、,]', val_str)]
+            
+            # 選択された先生がこのセルにいれば黄色くハイライト
+            for doc in selected_docs:
+                if doc in cell_docs:
+                    return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ff9900;'
             return ''
         
         base_style = df_result.style.apply(highlight_holidays, axis=1)
