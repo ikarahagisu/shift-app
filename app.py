@@ -288,7 +288,6 @@ st.divider()
 # ==========================================
 st.header("1. スタッフ条件の読み込み・入力（必須）")
 
-# ▼ テンプレートの列名を変更 ▼
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "入りにくい曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
@@ -331,7 +330,6 @@ if uploaded_file is not None:
         
     base_df = parse_staff_csv(uploaded_file.getvalue())
     
-    # ▼ 列名変更への対応 ▼
     if "入りにくい曜日(半角カンマ区切り)" not in base_df.columns:
         if "入りにくい曜日(メモ用)" in base_df.columns:
             base_df = base_df.rename(columns={"入りにくい曜日(メモ用)": "入りにくい曜日(半角カンマ区切り)"})
@@ -346,10 +344,19 @@ if "先生の名前" in base_df.columns:
 if "NG日(半角カンマ区切り)" not in base_df.columns:
     base_df["NG日(半角カンマ区切り)"] = ""
 
+# ▼ 【エラー回避策】読み込んだCSVのデータを安全な型に強制変換する処理 ▼
+if "希望優先度(数字が大きいほど優先)" in base_df.columns:
+    base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
+
+text_cols = ["入りにくい曜日(半角カンマ区切り)", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
+for c in text_cols:
+    if c in base_df.columns:
+        # 空白や不要な「nan」文字を消して、確実に文字列として扱う
+        base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
+
 st.markdown("##### 👩‍⚕️ スタッフ条件の入力・編集")
 st.write("※以下の表は直接クリックして文字を入力できます。（ヘッダーの列名にマウスを合わせると入力のヒントが出ます）")
 
-# ▼ 画面表示をスリムにするための設定 ▼
 edited_df = st.data_editor(
     base_df, 
     num_rows="dynamic", 
@@ -392,7 +399,6 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            # 列名変更に対応
             hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(半角カンマ区切り)", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
@@ -468,6 +474,7 @@ if not valid_staff.empty:
             with col_btn2:
                 st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
             
+            # 最新の状態を常に staff_df に反映
             current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs_str)
             
