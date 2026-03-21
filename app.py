@@ -960,8 +960,16 @@ if len(staff_df) > 0:
         
         st.subheader("📅 完成したシフト表")
         
-        # ▼ 変更：オレンジ、茶色、紫、ピンクを追加し、合計8色のマルチセレクトに拡張 ▼
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト（枠内をタップして複数人を選べます）</span>", unsafe_allow_html=True)
+        # ▼ 変更：表を描画する場所をここで「予約」しておく ▼
+        table_container = st.container()
+        
+        # ▼ 変更：ハイライトの設定欄をシフト表の下に移動 ▼
+        st.divider()
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
+        st.write("※下で選んだ色が、上のシフト表にリアルタイムで反映されます。")
+        
+        # 追加：ただ文字を入れられるだけのメモ欄（システムの計算には何も影響しません）
+        st.text_input("📝 ハイライトの項目名・メモ（自由に文字を入力できます）", placeholder="例：黄色＝指導医、赤色＝新人 など", key="hl_memo")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -986,7 +994,6 @@ if len(staff_df) > 0:
                         styles[i] = 'color: #ff4b4b; font-weight: bold;'
             return styles
         
-        # ▼ 変更：それぞれの色に対応したハイライト処理（全8色） ▼
         def color_highlighted_doctor(val):
             val_str = str(val)
             if val_str == "-" or val_str == "":
@@ -1021,8 +1028,12 @@ if len(staff_df) > 0:
             styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
         
         result_height = len(df_result) * 35 + 40
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
+        # ▼ 変更：予約しておいた「table_container」の場所に、色付けが完了した表を描画する ▼
+        with table_container:
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
+        
+        st.divider()
         st.subheader("📊 先生ごとのシフト回数（実績）")
         summary_list = []
         
