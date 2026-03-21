@@ -375,6 +375,31 @@ edited_df = st.data_editor(
 
 staff_df = edited_df.reset_index()
 
+# ▼▼▼ 新規追加：月間最大回数の合計と余裕度の表示 ▼▼▼
+st.markdown("##### ⚖️ シフト枠とスタッフの余裕度チェック")
+
+if "月間最大回数" in staff_df.columns:
+    # 空欄や文字を除外して数値に変換し、合計を出す
+    total_max_capacity = pd.to_numeric(staff_df["月間最大回数"], errors='coerce').fillna(0).sum()
+    total_max_capacity = int(total_max_capacity)
+    
+    # 必要な総シフト枠数（total_slots）はセクション2で計算済みのものを利用
+    margin = total_max_capacity - total_slots
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🏥 必要な総シフト枠数", f"{total_slots} 枠")
+    c2.metric("👩‍⚕️ スタッフ最大回数の合計", f"{total_max_capacity} 回分")
+    
+    if margin >= 0:
+        c3.metric("✨ 枠の余裕度（バッファ）", f"+{margin} 回分")
+        if margin < 3:
+            st.warning("⚠️ **枠の余裕が少なめです。** 誰かのNG日や「最低空ける日数」のルールが重なると、シフトが組めなくなる可能性があります。")
+    else:
+        c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
+        st.error("❌ **スタッフの最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各先生の「月間最大回数」を増やすか、増員設定を見直してください。")
+st.divider()
+# ▲▲▲ 新規追加：ここまで ▲▲▲
+
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
@@ -1036,7 +1061,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     reasons.append("⚠️ 条件が非常に厳しく、原因箇所の特定も困難な状態です。全員の間隔やNG日を少し緩めてみてください。")
             except Exception as e:
                 reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。条件を緩めてください。")
-        # ▲▲▲ 変更箇所：ここまで ▲▲▲
 
         return None, False, reasons, None, None
 
