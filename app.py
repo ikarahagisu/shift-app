@@ -69,7 +69,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
     * **【入りにくい曜日】** 「水,木」のように入力しておくと、NGカレンダーでその曜日に ⚠️マーク が表示され、休みたい日を選ぶ際の目印になります。
-    * **【NG日】** 医師ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (医師の名前)のNG日を確定する】**ボタンを押します。
+    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
@@ -87,7 +87,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 
     💡 **ポイント**: 
     * ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。
-    * 条件が厳しすぎてシフトが組めない場合は、エラーメッセージが出ます。その場合は、各医師の「最大回数」を増やしたり、「最低空ける日数」を減らしたりして条件を少し緩めてみてください。
+    * 条件が厳しすぎてシフトが組めない場合は、エラーメッセージが出ます。その場合は、各先生の「最大回数」を増やしたり、「最低空ける日数」を減らしたりして条件を少し緩めてみてください。
     * 完成したシフト表や、勤務回数の実績レポートはCSVでダウンロードできます。
     """)
 
@@ -719,7 +719,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
             req_count = multi_slots_dict.get((d, s_name), 1)
             if len(req_docs) > req_count:
-                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠（定員{req_count}名）に、定員を超える先生（{', '.join(req_docs)}）が確定指定（優先度100、または決定済みシフト）されているためパズルが破綻しています。")
+                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠（定員{req_count}名）に、定員を超える医師（{', '.join(req_docs)}）が確定指定（優先度100、または決定済みシフト）されているためパズルが破綻しています。")
                 
         abs_req_docs = [doc for doc in doctors if (d in absolute_req_days[doc] or any(sd == d for (sd, ss) in absolute_req_specific[doc]))]
         abs_req_docs = list(set(abs_req_docs))
@@ -870,7 +870,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         model.Minimize(max_hol_shifts)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 45.0
+    solver.parameters.max_time_in_seconds = 60.0
     solver.parameters.random_seed = random.randint(1, 10000)
     status = solver.Solve(model)
 
@@ -1048,7 +1048,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 relax_solver.parameters.max_time_in_seconds = 15.0
                 relax_status = relax_solver.Solve(relax_model)
 
-                # ▼▼▼ 変更箇所：ランキング表示の追加 ▼▼▼
                 if relax_status == cp_model.OPTIMAL or relax_status == cp_model.FEASIBLE:
                     bottlenecks = []
                     missing_by_shift = {s: 0 for s in NIGHT_SHIFTS + DAY_SHIFTS} # 各枠の不足数をカウントする箱
@@ -1080,8 +1079,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         
                     else:
                         reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。")
-                # ▲▲▲ 変更箇所：ここまで ▲▲▲
-                
                 else:
                     reasons.append("⚠️ 条件が非常に厳しく、原因箇所の特定も困難な状態です。全員の間隔やNG日を少し緩めてみてください。")
             except Exception as e:
@@ -1103,7 +1100,7 @@ fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
 
 if len(staff_df) > 0:
     if st.button("🚀 このデータでシフトを自動生成する", type="primary"):
-        with st.spinner("AIが最適なシフトを計算中...（最大45秒かかります）"):
+        with st.spinner("AIが最適なシフトを計算中...（最大60秒かかります）"):
             try:
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
                 
