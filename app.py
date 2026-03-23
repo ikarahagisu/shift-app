@@ -277,17 +277,15 @@ total_slots = sum(shift_counts.values())
 
 st.subheader(f"📌 {year}年{month}月の必要シフト枠数")
 
-# 4列と3列の2段構えで各シフトの必要枠数を表示
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
-c2.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
-c3.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
-c4.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
-
-c5, c6, c7 = st.columns(3)
-c5.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
-c6.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
-c7.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
+# ▼▼▼ 縦一列にスッキリ並べる設定を復活！ ▼▼▼
+st.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
+st.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
+st.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
+st.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
+st.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
+st.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
+st.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
+# ▲▲▲ 変更箇所ここまで ▲▲▲
 
 st.divider()
 
@@ -403,10 +401,10 @@ if "月間最大回数" in staff_df.columns:
             st.warning("⚠️ **枠の余裕が少なめです。** 誰かのNG日や「最低空ける日数」のルールが重なると、シフトが組めなくなる可能性があります。")
     else:
         c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
-        st.error("❌ **医師の月間最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各医師の「月間最大回数」を増やすか、増員設定を見直してください。")
+        st.error("❌ **医師の月間最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各先生の「月間最大回数」を増やすか、増員設定を見直してください。")
 st.divider()
 
-st.markdown("##### 🚫 医師ごとのNG日設定（カレンダーでクリック選択）")
+st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
