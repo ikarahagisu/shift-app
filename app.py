@@ -1374,7 +1374,7 @@ if len(staff_df) > 0:
         summary_height = len(df_summary) * 35 + 40
         st.dataframe(styled_summary, use_container_width=True, height=summary_height)
         
-        csv_result = df_result.to_csv(index=False).encode('shift_jis')
+        csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 完成したシフト表をCSVでダウンロード",
             data=csv_result,
