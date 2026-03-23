@@ -43,7 +43,7 @@ st.title("当直・日直 自動シフト作成アプリ")
 
 with st.expander("📖 初めての方へ：このアプリの特徴と使い方（クリックして開く）", expanded=False):
     st.markdown("""
-    このアプリは、各先生の希望や複雑な勤務ルールを考慮し、AIが自動で最適な当直・日直シフトを作成するシステムです。
+    このアプリは、各医師の希望や複雑な勤務ルールを考慮し、AIが自動で最適な当直・日直シフトを作成するシステムです。
 
     ### ✨ アプリの特徴
     * **スマホでも快適操作**: カレンダーからのNG日選択など、スマホからでもレイアウトが崩れずサクサク入力できます。
@@ -69,7 +69,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
     💡 **ポイント**: 「NG日」の設定は、CSVで数字を入力するよりも、**後からWEBアプリ上のカレンダーでポチポチ直感的にクリックする方が圧倒的に楽**です！CSVでは空欄にしておくことをお勧めします。
 
     * **【入りにくい曜日】** 「水,木」のように入力しておくと、NGカレンダーでその曜日に ⚠️マーク が表示され、休みたい日を選ぶ際の目印になります。
-    * **【NG日】** 先生ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (先生の名前)のNG日を確定する】**ボタンを押します。
+    * **【NG日】** 医師ごとにタブを切り替え、カレンダーから休みたい日を選んで、最後に赤い**【✨ (医師の名前)のNG日を確定する】**ボタンを押します。
     * **【希望日】** 入りたい日を半角カンマ区切りで入力します。
         * 日付だけ指定（例: `10, 15`）→ その日のどれかのシフトに入ります。
         * 枠まで指定（例: `10:宿直A, 15:日直B`）→ その日のその枠を狙います。
@@ -87,7 +87,7 @@ with st.expander("📖 初めての方へ：このアプリの特徴と使い方
 
     💡 **ポイント**: 
     * ボタンを押すたびに、AIが少しずつ違うパターンのシフトを提案してくれます。
-    * 条件が厳しすぎてシフトが組めない場合は、エラーメッセージが出ます。その場合は、各先生の「最大回数」を増やしたり、「最低空ける日数」を減らしたりして条件を少し緩めてみてください。
+    * 条件が厳しすぎてシフトが組めない場合は、エラーメッセージが出ます。その場合は、各医師の「最大回数」を増やしたり、「最低空ける日数」を減らしたりして条件を少し緩めてみてください。
     * 完成したシフト表や、勤務回数の実績レポートはCSVでダウンロードできます。
     """)
 
@@ -277,15 +277,17 @@ total_slots = sum(shift_counts.values())
 
 st.subheader(f"📌 {year}年{month}月の必要シフト枠数")
 
-# ▼▼▼ 変更箇所：縦一列にスッキリ並べる ▼▼▼
-st.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
-st.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
-st.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
-st.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
-st.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
-st.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
-st.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
-# ▲▲▲ 変更箇所：ここまで ▲▲▲
+# 4列と3列の2段構えで各シフトの必要枠数を表示
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
+c2.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
+c3.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
+c4.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
+
+c5, c6, c7 = st.columns(3)
+c5.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
+c6.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
+c7.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
 
 st.divider()
 
@@ -401,10 +403,10 @@ if "月間最大回数" in staff_df.columns:
             st.warning("⚠️ **枠の余裕が少なめです。** 誰かのNG日や「最低空ける日数」のルールが重なると、シフトが組めなくなる可能性があります。")
     else:
         c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
-        st.error("❌ **医師の月間最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各先生の「月間最大回数」を増やすか、増員設定を見直してください。")
+        st.error("❌ **医師の月間最大回数の合計が、必要なシフト枠数より少なくなっています！** このままでは絶対にシフトが組めません。上の表で各医師の「月間最大回数」を増やすか、増員設定を見直してください。")
 st.divider()
 
-st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
+st.markdown("##### 🚫 医師ごとのNG日設定（カレンダーでクリック選択）")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -904,7 +906,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
                 req_count = multi_slots_dict.get((d, s_name), 1)
                 if len(req_docs) > req_count:
-                    reasons.append(f"❌ **{target_month}/{d}**: 「{s_name}」枠（定員{req_count}名）に、定員を超える先生（{', '.join(req_docs)}）が確定指定しているため、パズルが破綻しています。")
+                    reasons.append(f"❌ **{target_month}/{d}**: 「{s_name}」枠（定員{req_count}名）に、定員を超える医師（{', '.join(req_docs)}）が確定指定しているため、パズルが破綻しています。")
 
         for d in range(1, num_days + 1):
             active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -912,25 +914,25 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             available = sum(1 for doc in doctors if d not in ng_days[doc])
             
             if available < req_slots:
-                reasons.append(f"❌ **{target_month}/{d}**: 必要な枠({req_slots}枠)に対して、出勤可能な先生({available}名)が足りません。（増員設定に対してNG希望者が多すぎます）")
+                reasons.append(f"❌ **{target_month}/{d}**: 必要な枠({req_slots}枠)に対して、出勤可能な医師({available}名)が足りません。（増員設定に対してNG希望者が多すぎます）")
             elif available <= req_slots + 2:
-                reasons.append(f"⚠️ **{target_month}/{d}**: 出勤可能な先生が{available}名しかおらず、人ごとの「最低空ける日数」ルールの影響でパズルが詰まっている可能性が高いです。")
+                reasons.append(f"⚠️ **{target_month}/{d}**: 出勤可能な医師が{available}名しかおらず、人ごとの「最低空ける日数」ルールの影響でパズルが詰まっている可能性が高いです。")
                 
         for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
             req_total = sum(multi_slots_dict.get((d, s_type), 1) for d in range(1, num_days + 1) if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
             max_available = sum(max_shifts_per_type[doc][s_type] for doc in doctors)
             if max_available < req_total:
-                reasons.append(f"❌ **「{s_type}」枠**: 月間に必要な総枠数({req_total}枠)に対して、先生全員の「上限回数の合計」({max_available}回)が足りていません。上限を増やす必要があります。")
+                reasons.append(f"❌ **「{s_type}」枠**: 月間に必要な総枠数({req_total}枠)に対して、医師全員の「上限回数の合計」({max_available}回)が足りていません。上限を増やす必要があります。")
                 
         theoretical_total = sum(max_shifts_total[doc] for doc in doctors)
         req_all_slots = sum(multi_slots_dict.get((d, s), 1) for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
         
         if theoretical_total < req_all_slots:
-            reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、先生全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
+            reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、医師全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
 
         theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
         if theoretical_min_total > req_all_slots:
-            reasons.append(f"❌ **最小回数の設定オーバー**: 先生全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
+            reasons.append(f"❌ **最小回数の設定オーバー**: 医師全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
 
         req_hol_total = 0
         for d in range(1, num_days + 1):
@@ -939,7 +941,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 req_hol_total += sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
         max_hol_available = sum(max_hol_shifts_per_doc[doc] for doc in doctors)
         if max_hol_available < req_hol_total:
-            reasons.append(f"❌ **休日シフト枠の不足**: 月間に必要な休日の総枠数({req_hol_total}枠)に対して、先生全員の「休日最大回数」の合計({max_hol_available}回分)が足りていません。各人の休日最大回数を増やしてください。")
+            reasons.append(f"❌ **休日シフト枠の不足**: 月間に必要な休日の総枠数({req_hol_total}枠)に対して、医師全員の「休日最大回数」の合計({max_hol_available}回分)が足りていません。各人の休日最大回数を増やしてください。")
 
 
         if not reasons:
@@ -963,7 +965,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         req_count = multi_slots_dict.get((d, s), 1)
                         relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == req_count)
 
-                # 2. 先生の制約（プランAと完全に同じものを適用し、絶対に崩さない）
+                # 2. 医師の制約（プランAと完全に同じものを適用し、絶対に崩さない）
                 for doc in doctors:
                     for d in range(1, num_days + 1):
                         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -1046,21 +1048,40 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 relax_solver.parameters.max_time_in_seconds = 15.0
                 relax_status = relax_solver.Solve(relax_model)
 
+                # ▼▼▼ 変更箇所：ランキング表示の追加 ▼▼▼
                 if relax_status == cp_model.OPTIMAL or relax_status == cp_model.FEASIBLE:
                     bottlenecks = []
+                    missing_by_shift = {s: 0 for s in NIGHT_SHIFTS + DAY_SHIFTS} # 各枠の不足数をカウントする箱
+                    
                     for d in range(1, num_days + 1):
                         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                         for s in active_shifts:
                             val = relax_solver.Value(dummies[(d, s)])
                             if val > 0:
                                 bottlenecks.append(f"・{target_month}月{d}日の「{s}」（あと {val} 人足りません）")
+                                missing_by_shift[s] += val # 不足数を枠ごとに足し算していく
 
                     if bottlenecks:
                         reasons.append("🚨 **以下のシフト枠を埋める人が見つかりませんでした。**")
                         reasons.append("（※全員の勤務間隔、NG日、他シフトとの被りなどを守ろうとした結果、この枠がどうしても空いてしまいます。該当箇所周辺の希望を見直してください）")
                         reasons.extend(bottlenecks)
+                        
+                        # ランキング表示の追加
+                        reasons.append("---")
+                        reasons.append("📊 **【参考】一番決まりにくい（人が足りない）シフト枠ランキング**")
+                        # 不足数が多い順に並び替え
+                        sorted_missing = sorted(missing_by_shift.items(), key=lambda x: x[1], reverse=True)
+                        rank = 1
+                        for s, count in sorted_missing:
+                            if count > 0:
+                                reasons.append(f"**第{rank}位：{s}** （月間で計 {count} 枠不足）")
+                                rank += 1
+                        reasons.append("💡 *※上位のシフト枠の「上限回数」を増やせる医師がいないか、優先して確認してみてください。*")
+                        
                     else:
                         reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。")
+                # ▲▲▲ 変更箇所：ここまで ▲▲▲
+                
                 else:
                     reasons.append("⚠️ 条件が非常に厳しく、原因箇所の特定も困難な状態です。全員の間隔やNG日を少し緩めてみてください。")
             except Exception as e:
@@ -1115,7 +1136,7 @@ if len(staff_df) > 0:
         table_container = st.container()
         
         st.divider()
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の先生のシフトを色別でハイライト</span>", unsafe_allow_html=True)
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の医師のシフトを色別でハイライト</span>", unsafe_allow_html=True)
         st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
         # ▼ 変更：「横並び」をやめて、マルチセレクトの真下にメモをくっつけてグループ化 ▼
@@ -1218,7 +1239,7 @@ if len(staff_df) > 0:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
         st.divider()
-        st.subheader("📊 先生ごとのシフト回数（実績）")
+        st.subheader("📊 医師ごとのシフト回数（実績）")
         summary_list = []
         
         req_days_eval = {}
