@@ -130,7 +130,8 @@ else:
     default_month = today.month + 1
 
 col_y, col_m = st.columns(2)
-year = col_y.number_input("年", min_value=2026, value=default_year, step=1)
+# ▼▼▼ 変更箇所：min_valueを2000に変更しました ▼▼▼
+year = col_y.number_input("年", min_value=2000, value=default_year, step=1)
 month = col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
 
 st.divider()
@@ -982,14 +983,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                 if 0 < (future_date - current_date).days <= interval:
                                     for s in active_shifts: relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
-                            for d1 in range(1, num_days + 1):
-                                for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
-                                    if d1 in all_abs_dates and d2 in all_abs_dates: continue
-                                    active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
-                                    active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
-                                    for s1 in active_shifts_d1:
-                                        for s2 in active_shifts_d2:
-                                            relax_model.Add(r_shifts[(d1, doc, s1)] + r_shifts[(d2, doc, s2)] <= 1)
+                        for d1 in range(1, num_days + 1):
+                            for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
+                                if d1 in all_abs_dates and d2 in all_abs_dates: continue
+                                active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
+                                active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
+                                for s1 in active_shifts_d1:
+                                    for s2 in active_shifts_d2:
+                                        relax_model.Add(r_shifts[(d1, doc, s1)] + r_shifts[(d2, doc, s2)] <= 1)
 
                 relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)))
 
@@ -1051,10 +1052,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         
                         return partial_df, False, reasons, past_worked_dates, future_worked_dates
                         
-                    else:
-                        reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。")
                 else:
-                    reasons.append("⚠️ 条件が非常に厳しく、原因箇所の特定も困難な状態です。全員の間隔やNG日を少し緩めてみてください。")
+                    reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。")
             except Exception as e:
                 reasons.append("⚠️ 特定の日付に明白な不足は見つかりませんでしたが、ルールの連鎖によってパズルが破綻しています。条件を緩めてください。")
 
