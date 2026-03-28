@@ -549,12 +549,13 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     invalid_requests = []
 
     # ==============================================
-    # 決定済みシフト(Fixed)の読み込み：無条件でabsolute_req_specificにぶち込む
+    # 決定済みシフト(Fixed)の読み込み
     # ==============================================
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
             date_str = str(row.get('日付', ''))
-            match = re.match(r'^\s*(\d+)\s*/\s*(\d+)', date_str)
+            # 🌟改修：2026/4/1 や 4月1日 などの様々な日付形式に対応
+            match = re.search(r'(\d+)\s*[/月\-]\s*(\d+)', date_str)
             if match:
                 m = int(match.group(1))
                 d = int(match.group(2))
@@ -584,7 +585,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                             doc_val = doc_val.strip()
                             if doc_val in doctors:
                                 if m == target_month:
-                                    # ⚠️ 改修：曜日に関係なく「入っている事実」を最優先で登録
                                     absolute_req_specific[doc_val].append((d, s_type))
                                 elif date_obj < datetime.date(target_year, target_month, 1):
                                     past_worked_dates[doc_val].append(date_obj)
@@ -646,7 +646,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
     
-    # 無効な希望日の弾き処理（※枠オーバーなどはここから削除し、無条件許容）
+    # 無効な希望日の弾き処理
     for doc in doctors:
         for d in req_days[doc]:
             if not (1 <= d <= num_days):
@@ -665,20 +665,18 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
         ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
 
-    # ==============================================
-    # 🌟重要改修：日ごとの「有効なシフト枠」を動的に生成
-    # （休日に設定されていなくても、決定済みシフトで「日直」が指定されれば強制開放）
-    # ==============================================
+    # 日ごとの「有効なシフト枠」を動的に生成
     daily_active_shifts = {}
     for d in range(1, num_days + 1):
         base_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-        # この日に「強制的に（決定済み等で）」指定されたシフトをすべてかき集める
         forced_shifts = [s for doc in doctors for sd, s in absolute_req_specific[doc] if sd == d and s in (NIGHT_SHIFTS + DAY_SHIFTS)]
         daily_active_shifts[d] = list(set(base_shifts + forced_shifts))
 
     if invalid_requests:
         unique_invalid = list(dict.fromkeys(invalid_requests))
         return None, False, unique_invalid, None, None
+
+    # 🌟改修：事前の定員オーバーチェックを削除。これによってAIが必ず計算を始めるようになります。
 
     model = cp_model.CpModel()
     shifts = {}
@@ -714,7 +712,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     # 4. 絶対指定（決定済みシフト）の強制反映
     for doc in doctors:
         for d in absolute_req_days[doc]:
-            # もし「日付」だけでなく「枠（日直Aなど）」も固定されている場合はそちらを優先
             specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
             if not specifics_on_d:
                 model.AddExactlyOne(shifts[(d, doc, s)] for s in daily_active_shifts[d])
