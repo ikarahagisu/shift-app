@@ -548,6 +548,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     invalid_requests = []
 
+    # ==============================================
+    # 決定済みシフト(Fixed)の読み込み：無条件でabsolute_req_specificにぶち込む
+    # ==============================================
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
             date_str = str(row.get('日付', ''))
@@ -581,17 +584,16 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                             doc_val = doc_val.strip()
                             if doc_val in doctors:
                                 if m == target_month:
-                                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                                    if s_type not in active_shifts:
-                                        day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
-                                        invalid_requests.append(f"❌ **「決定済みシフト(入力欄)」のエラー**: {target_month}月{d}日（{day_type}）には「{s_type}」枠がありませんが、{doc_val}先生が誤って入力されています。")
-                                    else:
-                                        absolute_req_specific[doc_val].append((d, s_type))
+                                    # ⚠️ 改修：曜日に関係なく「入っている事実」を最優先で登録
+                                    absolute_req_specific[doc_val].append((d, s_type))
                                 elif date_obj < datetime.date(target_year, target_month, 1):
                                     past_worked_dates[doc_val].append(date_obj)
                                 else:
                                     future_worked_dates[doc_val].append(date_obj)
 
+    # ==============================================
+    # 医師条件（スタッフデータ）の読み込み
+    # ==============================================
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
@@ -644,6 +646,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
     
+    # 無効な希望日の弾き処理（※枠オーバーなどはここから削除し、無条件許容）
     for doc in doctors:
         for d in req_days[doc]:
             if not (1 <= d <= num_days):
@@ -652,36 +655,26 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         for d, s_name in req_specific[doc]:
             if not (1 <= d <= num_days):
                 invalid_requests.append(f"❌ **{doc}先生**: {target_month}月にはない日付（{d}日）が希望日に指定されています。")
-            else:
-                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                if s_name not in active_shifts:
-                    day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
-                    invalid_requests.append(f"❌ **{doc}先生**: {target_month}月{d}日（{day_type}）には「{s_name}」というシフト枠はありません。（平日に日直を指定しているか、文字が間違っている可能性があります）")
 
-    # ▼▼▼ 修正箇所：インデントを直して、全医師の決定済みシフトからNG日を確実に除外する ▼▼▼
+    # 優先度100以上を絶対指定に格上げ＆NG日の相殺
     for doc in doctors:
         if req_priority[doc] >= 100:
             absolute_req_days[doc].extend([d for d in req_days[doc] if 1 <= d <= num_days])
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
             
-        # ここを外に出すことで、通常の優先度（1）の先生でも「決定済みの日は絶対にNG日を無視する」ようになります
         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
         ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
 
+    # ==============================================
+    # 🌟重要改修：日ごとの「有効なシフト枠」を動的に生成
+    # （休日に設定されていなくても、決定済みシフトで「日直」が指定されれば強制開放）
+    # ==============================================
+    daily_active_shifts = {}
     for d in range(1, num_days + 1):
-        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-        
-        for s_name in active_shifts:
-            req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
-            req_count = multi_slots_dict.get((d, s_name), 1)
-            if len(req_docs) > req_count:
-                invalid_requests.append(f"❌ **{target_month}月{d}日**: 「{s_name}」枠（定員{req_count}名）に、定員を超える医師（{', '.join(req_docs)}）が確定指定（優先度100、または決定済みシフト）されているためパズルが破綻しています。")
-                
-        abs_req_docs = [doc for doc in doctors if (d in absolute_req_days[doc] or any(sd == d for (sd, ss) in absolute_req_specific[doc]))]
-        abs_req_docs = list(set(abs_req_docs))
-        daily_req_count = sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
-        if len(abs_req_docs) > daily_req_count:
-            invalid_requests.append(f"❌ **{target_month}月{d}日**: その日の総枠数({daily_req_count}枠)に対して、確定指定が{len(abs_req_docs)}名（{', '.join(abs_req_docs)}）もいるため、全員を入れられません。")
+        base_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+        # この日に「強制的に（決定済み等で）」指定されたシフトをすべてかき集める
+        forced_shifts = [s for doc in doctors for sd, s in absolute_req_specific[doc] if sd == d and s in (NIGHT_SHIFTS + DAY_SHIFTS)]
+        daily_active_shifts[d] = list(set(base_shifts + forced_shifts))
 
     if invalid_requests:
         unique_invalid = list(dict.fromkeys(invalid_requests))
@@ -690,61 +683,60 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     model = cp_model.CpModel()
     shifts = {}
 
+    # 変数の定義
     for d in range(1, num_days + 1):
-        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
         for doc in doctors:
-            for s in active_shifts:
+            for s in daily_active_shifts[d]:
                 shifts[(d, doc, s)] = model.NewBoolVar(f'shift_d{d}_{doc}_{s}')
 
+    # 1. 枠の定員に関する制約（決定済みが定員を超えたら、自動で定員を拡張する！）
     for d in range(1, num_days + 1):
-        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-        for s in active_shifts:
+        for s in daily_active_shifts[d]:
             req_count = multi_slots_dict.get((d, s), 1)
-            model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == req_count)
+            fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
+            actual_req_count = max(req_count, fixed_docs_count)
+            model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == actual_req_count)
 
+    # 2. 1日あたりの最大シフト回数（決定済みで同日に2つ以上入っていれば、それを許容する）
     for doc in doctors:
         for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            
-            fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in active_shifts)
+            fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in daily_active_shifts[d])
             max_shifts_today = max(1, fixed_count)
-            
-            model.Add(sum(shifts[(d, doc, s)] for s in active_shifts) <= max_shifts_today)
+            model.Add(sum(shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
+    # 3. NG日の制約
     for doc in doctors:
         for d in ng_days[doc]:
             if 1 <= d <= num_days:
-                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                for s in active_shifts:
+                for s in daily_active_shifts[d]:
                     model.Add(shifts[(d, doc, s)] == 0)
 
+    # 4. 絶対指定（決定済みシフト）の強制反映
     for doc in doctors:
-        # ▼▼▼ 修正箇所：同日に「特定の枠指定（決定済）」がある場合、1日1回の縛りを解除して矛盾を防ぐ ▼▼▼
         for d in absolute_req_days[doc]:
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
+            # もし「日付」だけでなく「枠（日直Aなど）」も固定されている場合はそちらを優先
             specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
             if not specifics_on_d:
-                model.AddExactlyOne(shifts[(d, doc, s)] for s in active_shifts)
+                model.AddExactlyOne(shifts[(d, doc, s)] for s in daily_active_shifts[d])
             
         for d, s_name in absolute_req_specific[doc]:
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            if s_name in active_shifts:
+            if s_name in daily_active_shifts[d]:
                 model.Add(shifts[(d, doc, s_name)] == 1)
 
+    # 5. シフト枠ごとの上限回数（決定済みが上限を超えたら、自動で上限を拡張する！）
     for doc in doctors:
         for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
-            worked = [shifts[(d, doc, s_type)] for d in range(1, num_days + 1) 
-                      if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)]
+            worked = [shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
             if worked:
                 specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
                 actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count)
                 model.Add(sum(worked) <= actual_max_type)
 
+    # 6. 月間の全体回数上限・下限（決定済みが上限を超えたら、自動で上限を拡張する！）
     for doc in doctors:
         worked_all = []
         for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            for s in active_shifts:
+            for s in daily_active_shifts[d]:
                 worked_all.append(shifts[(d, doc, s)])
         if worked_all:
             all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
@@ -753,47 +745,48 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             model.Add(sum(worked_all) <= actual_max_total)
             model.Add(sum(worked_all) >= actual_min_total)
 
+    # 7. 連投禁止（間隔）ルールの適用
     for doc in doctors:
         interval = min_intervals[doc]
         if interval > 0:
             all_abs_dates = set(absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]])
             
             for d in range(1, num_days + 1):
+                # 決定済みシフトの日付は、過去/未来の勤務履歴による間隔制限を一切受けない（凌駕する）
                 if d in all_abs_dates:
                     continue
                 
                 current_date = datetime.date(target_year, target_month, d)
-                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                 
                 for past_date in past_worked_dates[doc]:
                     if 0 < (current_date - past_date).days <= interval:
-                        for s in active_shifts:
+                        for s in daily_active_shifts[d]:
                             model.Add(shifts[(d, doc, s)] == 0)
                             
                 for future_date in future_worked_dates[doc]:
                     if 0 < (future_date - current_date).days <= interval:
-                        for s in active_shifts:
+                        for s in daily_active_shifts[d]:
                             model.Add(shifts[(d, doc, s)] == 0)
             
             for d1 in range(1, num_days + 1):
                 for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
+                    # 決定済みシフト同士、または決定済みシフト絡みの日は間隔ルールを無視する
                     if d1 in all_abs_dates or d2 in all_abs_dates:
                         continue
-                        
-                    active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
-                    active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
                     
-                    for s1 in active_shifts_d1:
-                        for s2 in active_shifts_d2:
+                    for s1 in daily_active_shifts[d1]:
+                        for s2 in daily_active_shifts[d2]:
                             model.Add(shifts[(d1, doc, s1)] + shifts[(d2, doc, s2)] <= 1)
 
+    # 8. 休日の上限（決定済みが上限を超えたら拡張する）
     holiday_worked = {}
     for doc in doctors:
         hol_shifts = []
         for d in range(1, num_days + 1):
             if is_holiday(target_year, target_month, d):
-                for s in NIGHT_SHIFTS + DAY_SHIFTS:
-                    hol_shifts.append(shifts[(d, doc, s)])
+                for s in daily_active_shifts[d]:
+                    if s in NIGHT_SHIFTS + DAY_SHIFTS:
+                        hol_shifts.append(shifts[(d, doc, s)])
         holiday_worked[doc] = sum(hol_shifts)
         
         abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
@@ -806,6 +799,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for doc in doctors:
         model.Add(holiday_worked[doc] <= max_hol_shifts)
         
+    # 目的関数（希望日の叶えやすさスコア）
     objective_terms = []
     for doc in doctors:
         if req_priority[doc] < 100:  
@@ -813,15 +807,15 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             
             for d in req_days[doc]:
                 if 1 <= d <= num_days:
-                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                    for s in active_shifts:
-                        objective_terms.append(shifts[(d, doc, s)] * weight)
+                    for s in daily_active_shifts[d]:
+                        if (d, doc, s) in shifts:
+                            objective_terms.append(shifts[(d, doc, s)] * weight)
                         
             for d, s_name in req_specific[doc]:
                 if 1 <= d <= num_days:
-                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                    if s_name in active_shifts:
-                        objective_terms.append(shifts[(d, doc, s_name)] * weight)
+                    if s_name in daily_active_shifts[d]:
+                        if (d, doc, s_name) in shifts:
+                            objective_terms.append(shifts[(d, doc, s_name)] * weight)
                     
     if objective_terms:
         model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
@@ -845,8 +839,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             for s in NIGHT_SHIFTS + DAY_SHIFTS:
                 row[s] = "-"
                 
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            for s in active_shifts:
+            for s in daily_active_shifts[d]:
                 assigned_docs = []
                 for doc in doctors:
                     if solver.Value(shifts[(d, doc, s)]) == 1:
@@ -858,50 +851,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     
     else:
         reasons = []
-        
-        for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            for s_name in active_shifts:
-                req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
-                req_count = multi_slots_dict.get((d, s_name), 1)
-                if len(req_docs) > req_count:
-                    reasons.append(f"❌ **{target_month}/{d}**: 「{s_name}」枠（定員{req_count}名）に、定員を超える医師（{', '.join(req_docs)}）が確定指定しているため、パズルが破綻しています。")
-
-        for d in range(1, num_days + 1):
-            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            req_slots = sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
-            available = sum(1 for doc in doctors if d not in ng_days[doc])
-            
-            if available < req_slots:
-                reasons.append(f"❌ **{target_month}/{d}**: 必要な枠({req_slots}枠)に対して、出勤可能な医師({available}名)が足りません。（増員設定に対してNG希望者が多すぎます）")
-            elif available <= req_slots + 2:
-                reasons.append(f"⚠️ **{target_month}/{d}**: 出勤可能な医師が{available}名しかおらず、人ごとの「最低空ける日数」ルールの影響でパズルが詰まっている可能性が高いです。")
-                
-        for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
-            req_total = sum(multi_slots_dict.get((d, s_type), 1) for d in range(1, num_days + 1) if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
-            max_available = sum(max_shifts_per_type[doc][s_type] for doc in doctors)
-            if max_available < req_total:
-                reasons.append(f"❌ **「{s_type}」枠**: 月間に必要な総枠数({req_total}枠)に対して、医師全員の「上限回数の合計」({max_available}回)が足りていません。上限を増やす必要があります。")
-                
-        theoretical_total = sum(max_shifts_total[doc] for doc in doctors)
-        req_all_slots = sum(multi_slots_dict.get((d, s), 1) for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS))
-        
-        if theoretical_total < req_all_slots:
-            reasons.append(f"❌ **全体的な人数不足**: 増員を含めて月間に必要な総シフト数({req_all_slots}枠)に対し、医師全員の「月間最大回数」を足し合わせても({theoretical_total}枠分)足りていません。各人の最大回数を増やしてください。")
-
-        theoretical_min_total = sum(min_shifts_total[doc] for doc in doctors)
-        if theoretical_min_total > req_all_slots:
-            reasons.append(f"❌ **最小回数の設定オーバー**: 医師全員の「月間最小回数」の合計({theoretical_min_total}回)が、月間に必要な総シフト数({req_all_slots}枠)を上回っているため、全員の希望（最低回数）を満たすことができません。「月間最小回数」を下げてください。")
-
-        req_hol_total = 0
-        for d in range(1, num_days + 1):
-            if is_holiday(target_year, target_month, d):
-                active_shifts = NIGHT_SHIFTS + DAY_SHIFTS
-                req_hol_total += sum(multi_slots_dict.get((d, s), 1) for s in active_shifts)
-        max_hol_available = sum(max_hol_shifts_per_doc[doc] for doc in doctors)
-        if max_hol_available < req_hol_total:
-            reasons.append(f"❌ **休日シフト枠の不足**: 月間に必要な休日の総枠数({req_hol_total}枠)に対して、医師全員の「休日最大回数」の合計({max_hol_available}回分)が足りていません。各人の休日最大回数を増やしてください。")
-
         if not reasons:
             try:
                 relax_model = cp_model.CpModel()
@@ -909,45 +858,40 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 dummies = {}
 
                 for d in range(1, num_days + 1):
-                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                    for s in active_shifts:
+                    for s in daily_active_shifts[d]:
                         dummies[(d, s)] = relax_model.NewIntVar(0, 10, f'dummy_d{d}_{s}')
                         for doc in doctors:
                             r_shifts[(d, doc, s)] = relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}')
 
                 for d in range(1, num_days + 1):
-                    active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                    for s in active_shifts:
+                    for s in daily_active_shifts[d]:
                         req_count = multi_slots_dict.get((d, s), 1)
-                        relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == req_count)
+                        fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
+                        actual_req_count = max(req_count, fixed_docs_count)
+                        relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == actual_req_count)
 
                 for doc in doctors:
                     for d in range(1, num_days + 1):
-                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                        fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in active_shifts)
+                        fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in daily_active_shifts[d])
                         max_shifts_today = max(1, fixed_count)
-                        relax_model.Add(sum(r_shifts[(d, doc, s)] for s in active_shifts) <= max_shifts_today)
+                        relax_model.Add(sum(r_shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
                     for d in ng_days[doc]:
                         if 1 <= d <= num_days:
-                            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                            for s in active_shifts:
+                            for s in daily_active_shifts[d]:
                                 relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
-                    # ▼▼▼ 修正箇所：緩和モデルでも1日1回の縛りを解除 ▼▼▼
                     for d in absolute_req_days[doc]:
-                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
                         specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
                         if not specifics_on_d:
-                            relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in active_shifts)
+                            relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in daily_active_shifts[d])
 
                     for d, s_name in absolute_req_specific[doc]:
-                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                        if s_name in active_shifts:
+                        if s_name in daily_active_shifts[d]:
                             relax_model.Add(r_shifts[(d, doc, s_name)] == 1)
 
                     for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
-                        worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)]
+                        worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
                         if worked:
                             specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
                             actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count)
@@ -955,8 +899,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
                     worked_all = []
                     for d in range(1, num_days + 1):
-                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                        for s in active_shifts:
+                        for s in daily_active_shifts[d]:
                             worked_all.append(r_shifts[(d, doc, s)])
                     if worked_all:
                         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
@@ -966,8 +909,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     hol_shifts = []
                     for d in range(1, num_days + 1):
                         if is_holiday(target_year, target_month, d):
-                            for s in NIGHT_SHIFTS + DAY_SHIFTS:
-                                hol_shifts.append(r_shifts[(d, doc, s)])
+                            for s in daily_active_shifts[d]:
+                                if s in NIGHT_SHIFTS + DAY_SHIFTS:
+                                    hol_shifts.append(r_shifts[(d, doc, s)])
                     abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
                     abs_hol_count += sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
                     actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count)
@@ -979,25 +923,22 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         for d in range(1, num_days + 1):
                             if d in all_abs_dates: continue
                             current_date = datetime.date(target_year, target_month, d)
-                            active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
 
                             for past_date in past_worked_dates[doc]:
                                 if 0 < (current_date - past_date).days <= interval:
-                                    for s in active_shifts: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                                    for s in daily_active_shifts[d]: relax_model.Add(r_shifts[(d, doc, s)] == 0)
                             for future_date in future_worked_dates[doc]:
                                 if 0 < (future_date - current_date).days <= interval:
-                                    for s in active_shifts: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                                    for s in daily_active_shifts[d]: relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
                         for d1 in range(1, num_days + 1):
                             for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
                                 if d1 in all_abs_dates or d2 in all_abs_dates: continue
-                                active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
-                                active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
-                                for s1 in active_shifts_d1:
-                                    for s2 in active_shifts_d2:
+                                for s1 in daily_active_shifts[d1]:
+                                    for s2 in daily_active_shifts[d2]:
                                         relax_model.Add(r_shifts[(d1, doc, s1)] + r_shifts[(d2, doc, s2)] <= 1)
 
-                relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in (NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS)))
+                relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in daily_active_shifts[d]))
 
                 relax_solver = cp_model.CpSolver()
                 relax_solver.parameters.max_time_in_seconds = 15.0
@@ -1018,8 +959,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         for s in NIGHT_SHIFTS + DAY_SHIFTS:
                             row_dict[s] = "-"
                             
-                        active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                        for s in active_shifts:
+                        for s in daily_active_shifts[d]:
                             val = relax_solver.Value(dummies[(d, s)])
                             if val > 0:
                                 bottlenecks.append(f"・{target_month}月{d}日の「{s}」（あと {val} 人足りません）")
