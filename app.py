@@ -836,9 +836,10 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     
     else:
         # =========================================================
-        # 🌟復活：どうやっても人が足りない場合のバックアップ（緩和モデル）
+        # 🌟復活＆改修：どうやっても人が足りない場合のバックアップ（緩和モデル）
+        # メッセージを極力シンプルに整理しました
         # =========================================================
-        reasons = ["⚠️ 設定された条件が厳しすぎたため、完璧なシフトは組めませんでした。（全員がNG日など）"]
+        reasons = [] 
         try:
             relax_model = cp_model.CpModel()
             r_shifts = {}
@@ -949,7 +950,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     for s in daily_active_shifts[d]:
                         val = relax_solver.Value(dummies[(d, s)])
                         if val > 0:
-                            bottlenecks.append(f"・{target_month}月{d}日の「{s}」（あと {val} 人足りません）")
+                            bottlenecks.append(f"・{target_month}/{d} の「{s}」")
                             missing_by_shift[s] += val
 
                         assigned_docs = []
@@ -968,19 +969,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 partial_df = pd.DataFrame(partial_schedule_list)
 
                 if bottlenecks:
-                    reasons.append("🚨 **以下のシフト枠を埋める人が見つかりませんでした。**")
-                    reasons.append("（※全員の勤務間隔、NG日、他シフトとの被りなどを守ろうとした結果、この枠がどうしても空いてしまいます。該当箇所周辺の希望を見直してください）")
+                    reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
                     reasons.extend(bottlenecks)
-                    
-                    reasons.append("---")
-                    reasons.append("📊 **【参考】一番決まりにくい（人が足りない）シフト枠ランキング**")
+                    reasons.append("")
+                    reasons.append("📊 **【不足している枠の合計】**")
                     sorted_missing = sorted(missing_by_shift.items(), key=lambda x: x[1], reverse=True)
-                    rank = 1
                     for s, count in sorted_missing:
                         if count > 0:
-                            reasons.append(f"**第{rank}位：{s}** （月間で計 {count} 枠不足）")
-                            rank += 1
-                    reasons.append("💡 *※どうしてもこの日を埋める人がいない場合、どなたかのNG日や勤務間隔ルールの緩和をご検討ください。*")
+                            reasons.append(f"・{s}： 計 {count} 枠不足")
                     
                     return partial_df, False, reasons, past_worked_dates, future_worked_dates
         except Exception as e:
@@ -1022,16 +1018,17 @@ if len(staff_df) > 0:
                         st.session_state['generated_df'] = df_result
                         st.session_state['past_worked_dates'] = past_worked_dates or {}
                         st.session_state['future_worked_dates'] = future_worked_dates or {}
-                        st.error("入力された条件に誤りがあるか、条件が厳しすぎて完璧なシフトが組めませんでした。")
-                        st.warning("💡 **以下の原因が考えられます。Excelの入力や設定画面を見直してください。**")
+                        
+                        # 🌟改修：UI側のアラートをシンプルに1つにまとめました
+                        st.error("⚠️ **条件が厳しかったため、一部の枠が空いたままの「未完成のシフト表」が作成されました。**")
                         for reason in error_reasons:
                             st.write(reason)
-                        st.info("👇 **可能な範囲で割り当てた「未完成のシフト表」を作成しました。赤く強調されている部分が、誰も割り当てられなかった空き枠です。**")
+                        st.info("👇 **赤く強調されている「⚠️不足」の枠を手動で調整するか、条件を緩めて再度実行してください。**")
                     else:
                         if 'generated_df' in st.session_state:
                             del st.session_state['generated_df']
-                        st.error("入力された条件に誤りがあるか、条件が厳しすぎてシフトが組めませんでした。")
-                        st.warning("💡 **以下の原因が考えられます。Excelの入力や設定画面を見直してください。**")
+                        # 🌟改修：UI側のアラートをシンプルに1つにまとめました
+                        st.error("❌ **入力された条件が厳しすぎて、シフトを組むことができませんでした。**")
                         for reason in error_reasons:
                             st.write(reason)
             except Exception as e:
