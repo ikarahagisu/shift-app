@@ -548,9 +548,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     invalid_requests = []
 
-    # ==============================================
-    # 決定済みシフト(Fixed)の読み込み
-    # ==============================================
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
             date_str = str(row.get('日付', ''))
@@ -590,9 +587,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                                 else:
                                     future_worked_dates[doc_val].append(date_obj)
 
-    # ==============================================
-    # 医師条件（スタッフデータ）の読み込み
-    # ==============================================
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
@@ -714,7 +708,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             worked = [shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
             if worked:
                 specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
-                actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count)
+                # 🌟改修：絶対指定の日数（優先度100で日付のみ）も考慮して上限を開放する
+                actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
                 model.Add(sum(worked) <= actual_max_type)
 
     for doc in doctors:
@@ -771,7 +766,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count) 
         model.Add(holiday_worked[doc] <= actual_hol_max)
         
-    # 🌟改修：AI内部の上限（天井）を大幅に引き上げてエラーを防止
     global_max = num_days * 3 
     max_hol_shifts = model.NewIntVar(0, global_max, 'max_hol_shifts')
     for doc in doctors:
@@ -827,7 +821,6 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     else:
         reasons = []
         
-        # 🌟改修：AIが計算する前の「人間向けのエラーチェック」にも決定済みシフトの上限拡張を適用
         for d in range(1, num_days + 1):
             for s_name in daily_active_shifts[d]:
                 req_docs = [doc for doc in doctors if (d, s_name) in absolute_req_specific[doc]]
@@ -848,7 +841,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             max_available = 0
             for doc in doctors:
                 specific_req_count = sum(1 for sd, ss in absolute_req_specific[doc] if ss == s_type)
-                max_available += max(max_shifts_per_type[doc][s_type], specific_req_count)
+                # 🌟改修：絶対指定の日数（優先度100で日付のみ）も考慮して上限を開放する
+                max_available += max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
             if max_available < req_total:
                 reasons.append(f"❌ **「{s_type}」枠**: 月間に必要な総枠数({req_total}枠)に対して、医師全員の「上限回数の合計」({max_available}回)が足りていません。上限を増やす必要があります。")
                 
@@ -919,7 +913,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
                         if worked:
                             specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
-                            actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count)
+                            # 🌟改修：ここでも枠上限を緩和
+                            actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
                             relax_model.Add(sum(worked) <= actual_max_type)
 
                     worked_all = []
