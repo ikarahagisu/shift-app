@@ -130,7 +130,6 @@ else:
     default_month = today.month + 1
 
 col_y, col_m = st.columns(2)
-# ▼▼▼ 変更箇所：min_valueを2000に変更しました ▼▼▼
 year = col_y.number_input("年", min_value=2000, value=default_year, step=1)
 month = col_m.number_input("月", min_value=1, max_value=12, value=default_month, step=1)
 
@@ -241,7 +240,6 @@ st.divider()
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
 st.header("1. 医師条件の読み込み・入力（必須）")
-# ▼▼▼ 追記・修正箇所 ▼▼▼
 st.info("""
 💡 **【使い方・入力項目の説明】**
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
@@ -258,7 +256,6 @@ st.info("""
     * ⚠️ **【重要】**: 通常の「希望日（優先度1など）」は、これらのルールを満たす範囲内でのみ叶えられます。ルールと矛盾する希望は反映されないためご注意ください。
 * **備考**: 管理用のメモ欄です。「学会のため休み多め」など自由にご記入ください（AIの計算には影響しません）。
 """)
-# ▲▲▲ 追記・修正箇所 ▲▲▲
 
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
@@ -661,13 +658,15 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     day_type = "休日" if is_holiday(target_year, target_month, d) else "平日"
                     invalid_requests.append(f"❌ **{doc}先生**: {target_month}月{d}日（{day_type}）には「{s_name}」というシフト枠はありません。（平日に日直を指定しているか、文字が間違っている可能性があります）")
 
+    # ▼▼▼ 修正箇所：インデントを直して、全医師の決定済みシフトからNG日を確実に除外する ▼▼▼
     for doc in doctors:
         if req_priority[doc] >= 100:
             absolute_req_days[doc].extend([d for d in req_days[doc] if 1 <= d <= num_days])
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
             
-            all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
-            ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
+        # ここを外に出すことで、通常の優先度（1）の先生でも「決定済みの日は絶対にNG日を無視する」ようになります
+        all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
+        ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
 
     for d in range(1, num_days + 1):
         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -720,9 +719,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     model.Add(shifts[(d, doc, s)] == 0)
 
     for doc in doctors:
+        # ▼▼▼ 修正箇所：同日に「特定の枠指定（決定済）」がある場合、1日1回の縛りを解除して矛盾を防ぐ ▼▼▼
         for d in absolute_req_days[doc]:
             active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-            model.AddExactlyOne(shifts[(d, doc, s)] for s in active_shifts)
+            specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
+            if not specifics_on_d:
+                model.AddExactlyOne(shifts[(d, doc, s)] for s in active_shifts)
             
         for d, s_name in absolute_req_specific[doc]:
             active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -775,7 +777,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             
             for d1 in range(1, num_days + 1):
                 for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
-                    if d1 in all_abs_dates and d2 in all_abs_dates:
+                    if d1 in all_abs_dates or d2 in all_abs_dates:
                         continue
                         
                     active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
@@ -932,9 +934,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                             for s in active_shifts:
                                 relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
+                    # ▼▼▼ 修正箇所：緩和モデルでも1日1回の縛りを解除 ▼▼▼
                     for d in absolute_req_days[doc]:
                         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
-                        relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in active_shifts)
+                        specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
+                        if not specifics_on_d:
+                            relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in active_shifts)
 
                     for d, s_name in absolute_req_specific[doc]:
                         active_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
@@ -985,7 +990,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
                         for d1 in range(1, num_days + 1):
                             for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
-                                if d1 in all_abs_dates and d2 in all_abs_dates: continue
+                                if d1 in all_abs_dates or d2 in all_abs_dates: continue
                                 active_shifts_d1 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d1) else NIGHT_SHIFTS
                                 active_shifts_d2 = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d2) else NIGHT_SHIFTS
                                 for s1 in active_shifts_d1:
