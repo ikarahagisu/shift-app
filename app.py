@@ -239,7 +239,48 @@ st.divider()
 # ==========================================
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
-st.header("1. 医師条件の読み込み・入力（必須）")
+
+st.header("1. 過去・決定済みシフトの読み込み・入力（任意）")
+st.info("💡 **【使い方】** 先月末のシフト表をアップロードすれば、月初の間隔（連投禁止）ルールを正確に考慮できます。また、今月のシフトで「すでに人間が確定させた枠」があれば入力してください。AIが残りの空き枠だけを計算して埋めてくれます。")
+
+fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+fixed_template_df = pd.DataFrame(columns=fixed_columns)
+fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
+
+col_dl_fixed, col_ul_fixed = st.columns(2)
+with col_dl_fixed:
+    st.write("▼ Excelで一括入力したい場合")
+    st.download_button(
+        label="📥 ひな形（CSV）をダウンロード",
+        data=fixed_csv_template,
+        file_name="fixed_shift_template.csv",
+        mime="text/csv",
+    )
+with col_ul_fixed:
+    fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
+
+if fixed_file is not None:
+    try:
+        base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
+    except Exception as e:
+        st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
+        base_fixed_df = pd.DataFrame(columns=fixed_columns)
+else:
+    base_fixed_df = pd.DataFrame(columns=fixed_columns)
+    base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
+
+if "日付" in base_fixed_df.columns:
+    base_fixed_df = base_fixed_df.set_index("日付")
+
+st.markdown("##### 📅 決定済みシフトの入力・編集")
+st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
+edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
+
+edited_fixed_df = edited_fixed_df_raw.reset_index()
+
+st.divider()
+
+st.header("2. 医師条件の読み込み・入力（必須）")
 st.info("""
 💡 **【使い方・入力項目の説明】**
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
@@ -464,46 +505,6 @@ st.download_button(
     mime="text/csv",
     use_container_width=True
 )
-
-st.divider()
-
-st.header("2. 過去・決定済みシフトの読み込み・入力（任意）")
-st.info("💡 **【使い方】** 先月末のシフト表をアップロードすれば、月初の間隔（連投禁止）ルールを正確に考慮できます。また、今月のシフトで「すでに人間が確定させた枠」があれば入力してください。AIが残りの空き枠だけを計算して埋めてくれます。")
-
-fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
-fixed_template_df = pd.DataFrame(columns=fixed_columns)
-fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
-
-col_dl_fixed, col_ul_fixed = st.columns(2)
-with col_dl_fixed:
-    st.write("▼ Excelで一括入力したい場合")
-    st.download_button(
-        label="📥 ひな形（CSV）をダウンロード",
-        data=fixed_csv_template,
-        file_name="fixed_shift_template.csv",
-        mime="text/csv",
-    )
-with col_ul_fixed:
-    fixed_file = st.file_uploader("過去・決定済みシフト表（CSV）をアップロード", type="csv", key="fixed_csv")
-
-if fixed_file is not None:
-    try:
-        base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
-    except Exception as e:
-        st.warning(f"過去シフトファイルの読み込みに失敗しました。詳細: {e}")
-        base_fixed_df = pd.DataFrame(columns=fixed_columns)
-else:
-    base_fixed_df = pd.DataFrame(columns=fixed_columns)
-    base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
-
-if "日付" in base_fixed_df.columns:
-    base_fixed_df = base_fixed_df.set_index("日付")
-
-st.markdown("##### 📅 決定済みシフトの入力・編集")
-st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
-edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
-
-edited_fixed_df = edited_fixed_df_raw.reset_index()
 
 st.divider()
 
