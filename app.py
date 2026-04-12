@@ -467,6 +467,12 @@ if not valid_staff.empty:
                     for i, day in enumerate(week):
                         if day != 0:
                             date_obj = datetime.date(year, month, day)
+                            
+                            # 【変更箇所】平日は「日NG」を除外するロジック
+                            is_any_holiday = (date_obj.weekday() >= 5 or 
+                                              jpholiday.is_holiday(date_obj) or 
+                                              (day in custom_holidays))
+                            
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             is_hard = i in hard_days
@@ -475,9 +481,17 @@ if not valid_staff.empty:
                             
                             with cols[i]:
                                 chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                                opts = ["OK", "全NG", "日NG", "宿NG"]
-                                if st.session_state[chk_key] not in opts:
+                                
+                                # 休日ならすべての選択肢を表示、平日なら「日NG」を除外
+                                if is_any_holiday:
+                                    opts = ["OK", "全NG", "日NG", "宿NG"]
+                                else:
+                                    opts = ["OK", "全NG", "宿NG"]
+                                
+                                # 安全策：もしセッション状態に「日NG」が残っていて、その日が平日だった場合は「OK」にリセット
+                                if st.session_state.get(chk_key) not in opts:
                                     st.session_state[chk_key] = "OK"
+                                
                                 idx = opts.index(st.session_state[chk_key])
                                 current_ng = st.session_state[chk_key]
                                 
@@ -635,7 +649,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 hard_days_list.append(i)
         hard_weekdays[doc] = hard_days_list
         
-        # 🌟修正：NG日を詳細設定（全NG/日NG/宿NG）としてパース
+        # NG日を詳細設定（全NG/日NG/宿NG）としてパース
         ng_str = str(row['NG日(半角カンマ区切り)'])
         ng_dict = {}
         if not pd.isna(row['NG日(半角カンマ区切り)']) and ng_str.strip() != "" and ng_str.lower() not in ["nan", "none"]:
@@ -750,7 +764,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             max_shifts_today = max(1, fixed_count)
             model.Add(sum(shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
-    # 🌟修正：NG日の処理（全NG / 日NG / 宿NG を区別してブロック）
+    # NG日の処理（全NG / 日NG / 宿NG を区別してブロック）
     for doc in doctors:
         for d, ng_type in ng_days_dict[doc].items():
             if 1 <= d <= num_days:
@@ -950,7 +964,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     max_shifts_today = max(1, fixed_count)
                     relax_model.Add(sum(r_shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
-                # 🌟修正：緩和モデルでのNG日の処理
+                # 緩和モデルでのNG日の処理
                 for d, ng_type in ng_days_dict[doc].items():
                     if 1 <= d <= num_days:
                         if ng_type == "全NG":
