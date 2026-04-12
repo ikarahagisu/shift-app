@@ -60,7 +60,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     box-sizing: border-box !important; 
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 8px 0px !important; 
+    padding: 6px 2px !important; 
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -69,7 +69,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="
     overflow: hidden; 
 }
 
-/* Streamlit特有の余計なマージンを消去して高さを統一 */
+/* Streamlit特有の余計なマージンを消去 */
 div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) .element-container {
     margin: 0 !important;
     padding: 0 !important;
@@ -92,24 +92,16 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
     line-height: 1.5 !important; 
 }
 
-/* チェックボックスをセルの真ん中に配置 */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] {
-    display: flex;
-    justify-content: center !important;
-    align-items: flex-start !important; 
-    width: 100% !important;
+/* プルダウン（Selectbox）を極限までコンパクトに */
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-baseweb="select"] {
+    font-size: 0.75rem !important;
 }
-
-/* 四角と文字を「縦並び」にする */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stCheckbox"] label {
-    display: flex !important;
-    flex-direction: column-reverse !important; 
-    justify-content: flex-start !important;
-    align-items: center !important;
-    width: 100% !important;
-    margin: 0 auto !important; 
-    padding: 0 !important;
-    gap: 6px !important; 
+div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-baseweb="select"] > div {
+    padding-top: 0px !important;
+    padding-bottom: 0px !important;
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    min-height: 1.8rem !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -285,8 +277,8 @@ st.info("""
 💡 **【使い方・入力項目の説明】**
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
 
-* **入りにくい曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合のみ、下のカレンダーでチェックを入れてNG日にしてください。
-* **NG日**: 作成途中で保存したCSVファイルを使う場合を除き、数字を手入力するよりも、空欄にしておいて下にあるカレンダーでポチポチ選択したほうがミスが少ないです。
+* **入りにくい曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合は、下のカレンダーで「全NG」にしてください。
+* **NG日**: 下のカレンダーを使って**「全NG」「日NG（日直NG）」「宿NG（宿直NG）」**を直感的に選択できます。
 * **希望日**: `10, 15`（日付のみ）や、`10:宿直A`（枠まで指定）で入力します。
 * **希望優先度**: 絶対外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して【確実】にそのシフトに入ります。（通常は `1` です）
 * **各種ルールについて**:
@@ -301,7 +293,7 @@ st.info("""
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "入りにくい曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
-    "NG日(半角カンマ区切り)": ["", "", "", "", ""],
+    "NG日(半角カンマ区切り)": ["", "15:日NG", "10:宿NG", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
@@ -402,8 +394,8 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
 st.divider()
 
-st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーでクリック選択）")
-st.info("💡 **【使い方】** NG日はCSVに数字で手入力するより、このカレンダーで直感的にクリックして選ぶ方が圧倒的に楽です！休みたい日を選び終わったら、必ず最後に赤い「NG日を確定する」ボタンを押して保存してください。")
+st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
+st.info("💡 **【使い方】** カレンダー内のプルダウンから「OK」「全NG」「日NG（日直のみ不可）」「宿NG（宿直のみ不可）」を選べます。選び終わったら、必ず赤い「NG日を確定する」ボタンを押して保存してください。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -420,34 +412,50 @@ if not valid_staff.empty:
                 if w in hard_str:
                     hard_days.append(i)
 
+            # NG日のパース（全NG, 日NG, 宿NG）
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
-            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．', '0123456789,.'))
-            current_ng_list = []
+            current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．：', '0123456789,.:'))
+            current_ng_dict = {}
             if current_ng_str and current_ng_str.lower() not in ["nan", "none", ""]:
                 for x in current_ng_str.split(','):
-                    try:
-                        val = int(float(x.strip()))
-                        if 1 <= val <= num_days:
-                            current_ng_list.append(val)
-                    except:
-                        pass
+                    x = x.strip()
+                    if not x: continue
+                    if ':' in x:
+                        parts = x.split(':')
+                        try:
+                            val = int(float(parts[0].strip()))
+                            if 1 <= val <= num_days:
+                                current_ng_dict[val] = parts[1].strip()
+                        except:
+                            pass
+                    else:
+                        try:
+                            val = int(float(x.strip()))
+                            if 1 <= val <= num_days:
+                                current_ng_dict[val] = "全NG"
+                        except:
+                            pass
             
             for d in range(1, num_days + 1):
                 chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
                 if chk_key not in st.session_state:
-                    st.session_state[chk_key] = (d in current_ng_list)
+                    st.session_state[chk_key] = current_ng_dict.get(d, "OK")
 
-            current_ngs = [d for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
-            
-            if current_ngs:
-                saved_dates_str = ", ".join([f"{d}日" for d in current_ngs])
-                st.success(f"✅ **保存済みのNG日:** {saved_dates_str}")
+            saved_strs = []
+            for d in range(1, num_days + 1):
+                val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
+                if val == "全NG": saved_strs.append(f"{d}日")
+                elif val == "日NG": saved_strs.append(f"{d}日(日直NG)")
+                elif val == "宿NG": saved_strs.append(f"{d}日(宿直NG)")
+                
+            if saved_strs:
+                st.success(f"✅ **保存済みのNG日:** {', '.join(saved_strs)}")
             else:
                 st.info("💡 **保存済みのNG日はありません**")
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には日付の横に ⚠️ マークが表示されています。休みたい場合はチェックを入れてください。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には日付の横に ⚠️ マークが表示されています（自動で宿直が外れますが、翌日が休みの場合は入る可能性があります）。</span>", unsafe_allow_html=True)
 
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
@@ -467,14 +475,22 @@ if not valid_staff.empty:
                             
                             with cols[i]:
                                 if is_hol_or_sun:
-                                    day_label = f":red[**{day}日**] {warning_mark}"
+                                    day_text = f"<div style='color:#ff4b4b; font-weight:bold; font-size:0.85rem; margin-bottom:2px;'>{day}日 {warning_mark}</div>"
                                 elif is_sat:
-                                    day_label = f":blue[**{day}日**] {warning_mark}"
+                                    day_text = f"<div style='color:#1e90ff; font-weight:bold; font-size:0.85rem; margin-bottom:2px;'>{day}日 {warning_mark}</div>"
                                 else:
-                                    day_label = f"**{day}日** {warning_mark}"
-                                    
+                                    day_text = f"<div style='font-weight:bold; font-size:0.85rem; margin-bottom:2px;'>{day}日 {warning_mark}</div>"
+                                
+                                st.markdown(day_text, unsafe_allow_html=True)
+                                
                                 chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
-                                st.checkbox(day_label, key=chk_key)
+                                opts = ["OK", "全NG", "日NG", "宿NG"]
+                                # 万が一セッションに予期せぬ値が入っていたらOKに戻す
+                                if st.session_state[chk_key] not in opts:
+                                    st.session_state[chk_key] = "OK"
+                                idx = opts.index(st.session_state[chk_key])
+                                
+                                st.selectbox(f"{day}日のNG設定", options=opts, index=idx, key=chk_key, label_visibility="collapsed")
                         else:
                             with cols[i]:
                                 st.write("")
@@ -483,12 +499,20 @@ if not valid_staff.empty:
             
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
-                st.button("全選択", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, True), use_container_width=True)
+                st.button("全選択(全NG)", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG"), use_container_width=True)
             with col_btn2:
-                st.button("全解除", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, False), use_container_width=True)
+                st.button("全解除(OK)", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK"), use_container_width=True)
             
-            current_ngs_str = [str(d) for d in range(1, num_days + 1) if st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", False)]
-            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(current_ngs_str)
+            # DataFrameへ状態を保存
+            ng_items = []
+            for d in range(1, num_days + 1):
+                val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
+                if val == "全NG":
+                    ng_items.append(str(d))
+                elif val != "OK":
+                    ng_items.append(f"{d}:{val}")
+                    
+            staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(ng_items)
             
             if submitted:
                 st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
@@ -528,12 +552,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             return default_val
 
     doctors = staff_df['先生の名前'].astype(str).tolist()
-    ng_days = {}
+    ng_days_dict = {}
     req_days = {}          
     req_specific = {}      
     req_priority = {} 
     
-    # 🌟追加: 入りにくい曜日の保存用
+    # 入りにくい曜日の保存用
     hard_weekdays = {}
     
     min_intervals = {}
@@ -591,7 +615,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        # 🌟追加：入りにくい曜日を数値のリストとして取得（月=0, ..., 日=6）
+        # 入りにくい曜日を数値のリストとして取得（月=0, ..., 日=6）
         hard_str = str(row.get('入りにくい曜日(半角カンマ区切り)', ''))
         hard_days_list = []
         for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
@@ -599,14 +623,26 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 hard_days_list.append(i)
         hard_weekdays[doc] = hard_days_list
         
+        # 🌟修正：NG日を詳細設定（全NG/日NG/宿NG）としてパース
         ng_str = str(row['NG日(半角カンマ区切り)'])
-        if pd.isna(row['NG日(半角カンマ区切り)']) or ng_str.strip() == "" or ng_str.lower() in ["nan", "none"]:
-            ng_days[doc] = []
-        else:
-            try:
-                ng_days[doc] = [int(x.strip()) for x in ng_str.split(',')]
-            except:
-                ng_days[doc] = []
+        ng_dict = {}
+        if not pd.isna(row['NG日(半角カンマ区切り)']) and ng_str.strip() != "" and ng_str.lower() not in ["nan", "none"]:
+            ng_str = ng_str.translate(str.maketrans('０１２３４５６７８９，．：', '0123456789,.:'))
+            for x in ng_str.split(','):
+                x = x.strip()
+                if not x: continue
+                if ':' in x:
+                    parts = x.split(':')
+                    try:
+                        d_val = int(float(parts[0].strip()))
+                        ng_dict[d_val] = parts[1].strip()
+                    except: pass
+                else:
+                    try:
+                        d_val = int(float(x.strip()))
+                        ng_dict[d_val] = "全NG"
+                    except: pass
+        ng_days_dict[doc] = ng_dict
                 
         req_days[doc] = []
         req_specific[doc] = []
@@ -663,7 +699,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
             
         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
-        ng_days[doc] = [d for d in ng_days[doc] if d not in all_abs_dates]
+        # 絶対希望日に入っている場合はNG日から除外
+        ng_days_dict[doc] = {d: v for d, v in ng_days_dict[doc].items() if d not in all_abs_dates}
 
     daily_active_shifts = {}
     for d in range(1, num_days + 1):
@@ -701,13 +738,23 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             max_shifts_today = max(1, fixed_count)
             model.Add(sum(shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
+    # 🌟修正：NG日の処理（全NG / 日NG / 宿NG を区別してブロック）
     for doc in doctors:
-        for d in ng_days[doc]:
+        for d, ng_type in ng_days_dict[doc].items():
             if 1 <= d <= num_days:
-                for s in daily_active_shifts[d]:
-                    model.Add(shifts[(d, doc, s)] == 0)
+                if ng_type == "全NG":
+                    for s in daily_active_shifts[d]:
+                        model.Add(shifts[(d, doc, s)] == 0)
+                elif ng_type == "日NG":
+                    for s in daily_active_shifts[d]:
+                        if s in DAY_SHIFTS:
+                            model.Add(shifts[(d, doc, s)] == 0)
+                elif ng_type == "宿NG":
+                    for s in daily_active_shifts[d]:
+                        if s in NIGHT_SHIFTS:
+                            model.Add(shifts[(d, doc, s)] == 0)
 
-    # 🌟修正：入りにくい曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする！
+    # 入りにくい曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
@@ -891,12 +938,21 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     max_shifts_today = max(1, fixed_count)
                     relax_model.Add(sum(r_shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
-                for d in ng_days[doc]:
+                # 🌟修正：緩和モデルでのNG日の処理
+                for d, ng_type in ng_days_dict[doc].items():
                     if 1 <= d <= num_days:
-                        for s in daily_active_shifts[d]:
-                            relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        if ng_type == "全NG":
+                            for s in daily_active_shifts[d]:
+                                relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        elif ng_type == "日NG":
+                            for s in daily_active_shifts[d]:
+                                if s in DAY_SHIFTS:
+                                    relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        elif ng_type == "宿NG":
+                            for s in daily_active_shifts[d]:
+                                if s in NIGHT_SHIFTS:
+                                    relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
-                # 🌟修正：緩和モデルでも、入りにくい曜日（翌日が平日の場合）は「宿直」のみNGにする
                 for d in range(1, num_days + 1):
                     date_obj = datetime.date(target_year, target_month, d)
                     next_date = date_obj + datetime.timedelta(days=1)
