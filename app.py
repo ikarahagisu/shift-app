@@ -41,7 +41,7 @@ def set_all_ng(doc_name, y, m, ndays, val):
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
 
-# === 🌟改修：スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
+# === スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
 /* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
@@ -285,7 +285,7 @@ st.info("""
 💡 **【使い方・入力項目の説明】**
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
 
-* **入りにくい曜日**: `水,木` のように入力すると、下のカレンダーに⚠️マークがつき、休みたい日（NG日）を選ぶ際の目印になります。（※自動で休みになるわけではありません）
+* **入りにくい曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合のみ、下のカレンダーでチェックを入れてNG日にしてください。
 * **NG日**: 作成途中で保存したCSVファイルを使う場合を除き、数字を手入力するよりも、空欄にしておいて下にあるカレンダーでポチポチ選択したほうがミスが少ないです。
 * **希望日**: `10, 15`（日付のみ）や、`10:宿直A`（枠まで指定）で入力します。
 * **希望優先度**: 絶対外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して【確実】にそのシフトに入ります。（通常は `1` です）
@@ -533,6 +533,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     req_specific = {}      
     req_priority = {} 
     
+    # 🌟追加: 入りにくい曜日の保存用
+    hard_weekdays = {}
+    
     min_intervals = {}
     min_shifts_total = {}
     max_shifts_total = {}
@@ -587,6 +590,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
+        
+        # 🌟追加：入りにくい曜日を数値のリストとして取得（月=0, ..., 日=6）
+        hard_str = str(row.get('入りにくい曜日(半角カンマ区切り)', ''))
+        hard_days_list = []
+        for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
+            if w in hard_str:
+                hard_days_list.append(i)
+        hard_weekdays[doc] = hard_days_list
         
         ng_str = str(row['NG日(半角カンマ区切り)'])
         if pd.isna(row['NG日(半角カンマ区切り)']) or ng_str.strip() == "" or ng_str.lower() in ["nan", "none"]:
@@ -695,6 +706,22 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             if 1 <= d <= num_days:
                 for s in daily_active_shifts[d]:
                     model.Add(shifts[(d, doc, s)] == 0)
+
+    # 🌟修正：入りにくい曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする！
+    for doc in doctors:
+        for d in range(1, num_days + 1):
+            date_obj = datetime.date(target_year, target_month, d)
+            next_date = date_obj + datetime.timedelta(days=1)
+            
+            next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
+            if next_date.year == target_year and next_date.month == target_month:
+                if next_date.day in custom_holidays:
+                    next_is_hol = True
+                    
+            if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
+                for s in NIGHT_SHIFTS:
+                    if s in daily_active_shifts[d]:
+                        model.Add(shifts[(d, doc, s)] == 0)
 
     for doc in doctors:
         for d in absolute_req_days[doc]:
@@ -837,8 +864,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     
     else:
         # =========================================================
-        # 🌟復活＆改修：どうやっても人が足りない場合のバックアップ（緩和モデル）
-        # メッセージを極力シンプルに整理しました
+        # バックアップ（緩和モデル）
         # =========================================================
         reasons = [] 
         try:
@@ -869,6 +895,21 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     if 1 <= d <= num_days:
                         for s in daily_active_shifts[d]:
                             relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                # 🌟修正：緩和モデルでも、入りにくい曜日（翌日が平日の場合）は「宿直」のみNGにする
+                for d in range(1, num_days + 1):
+                    date_obj = datetime.date(target_year, target_month, d)
+                    next_date = date_obj + datetime.timedelta(days=1)
+                    
+                    next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
+                    if next_date.year == target_year and next_date.month == target_month:
+                        if next_date.day in custom_holidays:
+                            next_is_hol = True
+                            
+                    if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
+                        for s in NIGHT_SHIFTS:
+                            if s in daily_active_shifts[d]:
+                                relax_model.Add(r_shifts[(d, doc, s)] == 0)
 
                 for d in absolute_req_days[doc]:
                     specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
@@ -1020,7 +1061,6 @@ if len(staff_df) > 0:
                         st.session_state['past_worked_dates'] = past_worked_dates or {}
                         st.session_state['future_worked_dates'] = future_worked_dates or {}
                         
-                        # 🌟改修：UI側のアラートをシンプルに1つにまとめました
                         st.error("⚠️ **条件が厳しかったため、一部の枠が空いたままの「未完成のシフト表」が作成されました。**")
                         for reason in error_reasons:
                             st.write(reason)
@@ -1028,7 +1068,6 @@ if len(staff_df) > 0:
                     else:
                         if 'generated_df' in st.session_state:
                             del st.session_state['generated_df']
-                        # 🌟改修：UI側のアラートをシンプルに1つにまとめました
                         st.error("❌ **入力された条件が厳しすぎて、シフトを組むことができませんでした。**")
                         for reason in error_reasons:
                             st.write(reason)
