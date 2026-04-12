@@ -33,9 +33,15 @@ def parse_fixed_csv(file_bytes):
 # ==========================================
 # カレンダー一括操作用の裏側ロジック
 # ==========================================
-def set_all_ng(doc_name, y, m, ndays, val):
+def set_all_ng(doc_name, y, m, ndays, val, custom_hols=[]):
     for d in range(1, ndays + 1):
-        st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = val
+        if val == "OK":
+            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = "OK"
+        else:
+            # 「全選択」が押された場合、休日は「全NG」、平日は「宿NG」にする
+            date_obj = datetime.date(y, m, d)
+            is_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj) or (d in custom_hols)
+            st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = "全NG" if is_hol else "宿NG"
 
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
@@ -105,6 +111,7 @@ div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-baseweb="s
 }
 </style>
 """, unsafe_allow_html=True)
+# ==============================================================================
 
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
@@ -277,14 +284,14 @@ st.info("""
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
 
 * **入れない曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合は、下のカレンダーで「全NG」にしてください。
-* **NG日**: 下のカレンダーを使って**「全NG」「日NG（日直NG）」「宿NG（宿直NG）」**を直感的に選択できます。
+* **NG日**: 下のカレンダーを使って休日は「全NG」「日NG」「宿NG」、平日は「宿NG」を直感的に選択できます。
 * **希望日**: `10, 15`（日付のみ）や、`10:宿直A`（枠まで指定）で入力します。
 * **希望優先度**: 絶対外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して【確実】にそのシフトに入ります。（通常は `1` です）
 * **各種ルールについて**:
     * **最低空ける日数**: 勤務と勤務の間を最低何日空けるかを指定します。
     * **月間最小回数 / 月間最大回数**: その月に割り当てる総シフト数の下限と上限です。
     * **休日最大回数**: 土日祝などの「休日扱い」の日に割り当てる最大回数です。
-    * **各枠の上上限（宿直A上限、日直B上限など）**: 特定のシフト枠ごとに入る最大回数です。
+    * **各枠の上限（宿直A上限、日直B上限など）**: 特定のシフト枠ごとに入る最大回数です。
     * ⚠️ **【重要】**: 通常の「希望日（優先度1など）」は、これらのルールを満たす範囲内でのみ叶えられます。ルールと矛盾する希望は反映されないためご注意ください。
 * **備考**: 管理用のメモ欄です。「学会のため休み多め」など自由にご記入ください（AIの計算には影響しません）。
 """)
@@ -394,7 +401,7 @@ if "月間最大回数" in staff_df.columns:
 st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
-st.info("💡 **【使い方】** カレンダー内のプルダウンから「OK」「全NG」「日NG（日直のみ不可）」「宿NG（宿直のみ不可）」を選べます。選び終わったら、必ず赤い「NG日を確定する」ボタンを押して保存してください。")
+st.info("💡 **【使い方】** カレンダー内のプルダウンから休日は「OK」「全NG」「日NG」「宿NG」、平日は「OK」「宿NG」を選べます。選び終わったら、必ず赤い「NG日を確定する」ボタンを押して保存してください。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -411,7 +418,7 @@ if not valid_staff.empty:
                 if w in hard_str:
                     hard_days.append(i)
 
-            # NG日のパース
+            # NG日のパース（全NG, 日NG, 宿NG）
             current_ng_str = str(valid_staff.loc[original_idx].get("NG日(半角カンマ区切り)", ""))
             current_ng_str = current_ng_str.translate(str.maketrans('０１２３４５６７８９，．：', '0123456789,.:'))
             current_ng_dict = {}
@@ -466,12 +473,6 @@ if not valid_staff.empty:
                     for i, day in enumerate(week):
                         if day != 0:
                             date_obj = datetime.date(year, month, day)
-                            
-                            # その日が「休日扱い（日直がある日）」かどうかを判定
-                            is_any_holiday = (date_obj.weekday() >= 5 or 
-                                              jpholiday.is_holiday(date_obj) or 
-                                              (day in custom_holidays))
-                            
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
                             is_hard = i in hard_days
@@ -481,18 +482,24 @@ if not valid_staff.empty:
                             with cols[i]:
                                 chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                                 
-                                # 【変更点】休日なら全選択肢、平日なら「OK」と「宿NG」のみ
-                                if is_any_holiday:
+                                # === 変更部分：平日と休日で選択肢を変える ===
+                                is_holiday_for_ng = is_hol_or_sun or is_sat
+                                if is_holiday_for_ng:
                                     opts = ["OK", "全NG", "日NG", "宿NG"]
                                 else:
                                     opts = ["OK", "宿NG"]
                                 
-                                # 安全策：もしセッション状態に平日なのに全NGや日NGが残っていたらOKにリセット
-                                if st.session_state.get(chk_key) not in opts:
-                                    st.session_state[chk_key] = "OK"
-                                
+                                # 万が一、平日に「全NG」や「日NG」がセッションステートに残っていた場合の補正
+                                current_val = st.session_state.get(chk_key, "OK")
+                                if current_val not in opts:
+                                    if current_val == "全NG" or current_val == "宿NG":
+                                        st.session_state[chk_key] = "宿NG"
+                                    else:
+                                        st.session_state[chk_key] = "OK"
+
                                 idx = opts.index(st.session_state[chk_key])
                                 current_ng = st.session_state[chk_key]
+                                # ===========================================
                                 
                                 # 文字色の決定
                                 if is_hol_or_sun:
@@ -524,9 +531,10 @@ if not valid_staff.empty:
             
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
-                st.button("全選択(全NG)", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG"), use_container_width=True)
+                # 変更部分：休日は全NG、平日は宿NGにするように引数を追加
+                st.button("全選択(NG)", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
             with col_btn2:
-                st.button("全解除(OK)", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK"), use_container_width=True)
+                st.button("全解除(OK)", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
             
             # DataFrameへ状態を保存
             ng_items = []
@@ -582,7 +590,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     req_specific = {}      
     req_priority = {} 
     
+    # 入れない曜日の保存用
     hard_weekdays = {}
+    
     min_intervals = {}
     min_shifts_total = {}
     max_shifts_total = {}
@@ -637,6 +647,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
+        
+        # 入れない曜日を数値のリストとして取得（月=0, ..., 日=6）
         hard_str = str(row.get('入れない曜日(半角カンマ区切り)', ''))
         hard_days_list = []
         for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
@@ -644,6 +656,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 hard_days_list.append(i)
         hard_weekdays[doc] = hard_days_list
         
+        # NG日を詳細設定（全NG/日NG/宿NG）としてパース
         ng_str = str(row['NG日(半角カンマ区切り)'])
         ng_dict = {}
         if not pd.isna(row['NG日(半角カンマ区切り)']) and ng_str.strip() != "" and ng_str.lower() not in ["nan", "none"]:
@@ -673,34 +686,42 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 items = req_str.split(',')
                 for item in items:
                     item = item.strip()
-                    if not item: continue
+                    if not item:
+                        continue
                     if ':' in item:
                         parts = item.split(':')
                         try:
                             d = int(parts[0].strip())
                             s_name = parts[1].strip()
                             req_specific[doc].append((d, s_name))
-                        except: pass
+                        except:
+                            pass
                     else:
                         try:
                             req_days[doc].append(int(item))
-                        except: pass
+                        except:
+                            pass
 
         req_priority[doc] = safe_int(row.get('希望優先度(数字が大きいほど優先)'), 1)
         min_intervals[doc] = safe_int(row.get('最低空ける日数'), 5)
         min_shifts_total[doc] = safe_int(row.get('月間最小回数'), 0)
         max_shifts_total[doc] = safe_int(row.get('月間最大回数'), 5)
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
+
         max_shifts_per_type[doc] = {
-            '宿直A': safe_int(row.get('宿直A上限'), 2), '宿直B': safe_int(row.get('宿直B上限'), 2),
-            '外来宿直': safe_int(row.get('外来宿直上限'), 2), '日直A': safe_int(row.get('日直A上限'), 2),
-            '日直B': safe_int(row.get('日直B上限'), 2), '外来日直': safe_int(row.get('外来日直上限'), 2)
+            '宿直A': safe_int(row.get('宿直A上限'), 2),
+            '宿直B': safe_int(row.get('宿直B上限'), 2),
+            '外来宿直': safe_int(row.get('外来宿直上限'), 2),
+            '日直A': safe_int(row.get('日直A上限'), 2),
+            '日直B': safe_int(row.get('日直B上限'), 2),
+            '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
     
     for doc in doctors:
         for d in req_days[doc]:
             if not (1 <= d <= num_days):
                 invalid_requests.append(f"❌ **{doc}先生**: {target_month}月にはない日付（{d}日）が希望日に指定されています。")
+                
         for d, s_name in req_specific[doc]:
             if not (1 <= d <= num_days):
                 invalid_requests.append(f"❌ **{doc}先生**: {target_month}月にはない日付（{d}日）が希望日に指定されています。")
@@ -709,7 +730,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         if req_priority[doc] >= 100:
             absolute_req_days[doc].extend([d for d in req_days[doc] if 1 <= d <= num_days])
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
+            
         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
+        # 絶対希望日に入っている場合はNG日から除外
         ng_days_dict[doc] = {d: v for d, v in ng_days_dict[doc].items() if d not in all_abs_dates}
 
     daily_active_shifts = {}
@@ -738,6 +761,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             req_count = multi_slots_dict.get((d, s), 1)
             fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
             actual_req_count = max(req_count, fixed_docs_count)
+            
             model.Add(sum(shifts[(d, doc, s)] for doc in doctors) == actual_req_count + over_caps[(d, s)])
             objective_terms.append(over_caps[(d, s)] * -50000)
 
@@ -747,35 +771,47 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             max_shifts_today = max(1, fixed_count)
             model.Add(sum(shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
 
+    # NG日の処理（全NG / 日NG / 宿NG を区別してブロック）
     for doc in doctors:
         for d, ng_type in ng_days_dict[doc].items():
             if 1 <= d <= num_days:
                 if ng_type == "全NG":
-                    for s in daily_active_shifts[d]: model.Add(shifts[(d, doc, s)] == 0)
+                    for s in daily_active_shifts[d]:
+                        model.Add(shifts[(d, doc, s)] == 0)
                 elif ng_type == "日NG":
                     for s in daily_active_shifts[d]:
-                        if s in DAY_SHIFTS: model.Add(shifts[(d, doc, s)] == 0)
+                        if s in DAY_SHIFTS:
+                            model.Add(shifts[(d, doc, s)] == 0)
                 elif ng_type == "宿NG":
                     for s in daily_active_shifts[d]:
-                        if s in NIGHT_SHIFTS: model.Add(shifts[(d, doc, s)] == 0)
+                        if s in NIGHT_SHIFTS:
+                            model.Add(shifts[(d, doc, s)] == 0)
 
+    # 入れない曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
             next_date = date_obj + datetime.timedelta(days=1)
+            
             next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
             if next_date.year == target_year and next_date.month == target_month:
-                if next_date.day in custom_holidays: next_is_hol = True
+                if next_date.day in custom_holidays:
+                    next_is_hol = True
+                    
             if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
                 for s in NIGHT_SHIFTS:
-                    if s in daily_active_shifts[d]: model.Add(shifts[(d, doc, s)] == 0)
+                    if s in daily_active_shifts[d]:
+                        model.Add(shifts[(d, doc, s)] == 0)
 
     for doc in doctors:
         for d in absolute_req_days[doc]:
             specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
-            if not specifics_on_d: model.AddExactlyOne(shifts[(d, doc, s)] for s in daily_active_shifts[d])
+            if not specifics_on_d:
+                model.AddExactlyOne(shifts[(d, doc, s)] for s in daily_active_shifts[d])
+            
         for d, s_name in absolute_req_specific[doc]:
-            if s_name in daily_active_shifts[d]: model.Add(shifts[(d, doc, s_name)] == 1)
+            if s_name in daily_active_shifts[d]:
+                model.Add(shifts[(d, doc, s_name)] == 1)
 
     for doc in doctors:
         for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
@@ -788,11 +824,15 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     min_shortfalls = {}
     for doc in doctors:
         min_shortfalls[doc] = model.NewIntVar(0, num_days, f'min_shortfall_{doc}')
-        worked_all = [shifts[(d, doc, s)] for d in range(1, num_days + 1) for s in daily_active_shifts[d]]
+        worked_all = []
+        for d in range(1, num_days + 1):
+            for s in daily_active_shifts[d]:
+                worked_all.append(shifts[(d, doc, s)])
         if worked_all:
             all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
             actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
             actual_min_total = min(min_shifts_total[doc], actual_max_total)
+            
             model.Add(sum(worked_all) <= actual_max_total)
             model.Add(sum(worked_all) + min_shortfalls[doc] >= actual_min_total)
             objective_terms.append(min_shortfalls[doc] * -10000)
@@ -801,110 +841,548 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         interval = min_intervals[doc]
         if interval > 0:
             all_abs_dates = set(absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]])
+            
             for d in range(1, num_days + 1):
-                if d in all_abs_dates: continue
+                if d in all_abs_dates:
+                    continue
                 current_date = datetime.date(target_year, target_month, d)
                 for past_date in past_worked_dates[doc]:
                     if 0 < (current_date - past_date).days <= interval:
-                        for s in daily_active_shifts[d]: model.Add(shifts[(d, doc, s)] == 0)
+                        for s in daily_active_shifts[d]:
+                            model.Add(shifts[(d, doc, s)] == 0)
+                            
                 for future_date in future_worked_dates[doc]:
                     if 0 < (future_date - current_date).days <= interval:
-                        for s in daily_active_shifts[d]: model.Add(shifts[(d, doc, s)] == 0)
+                        for s in daily_active_shifts[d]:
+                            model.Add(shifts[(d, doc, s)] == 0)
+            
             for d1 in range(1, num_days + 1):
                 for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
-                    if d1 in all_abs_dates or d2 in all_abs_dates: continue
+                    if d1 in all_abs_dates or d2 in all_abs_dates:
+                        continue
                     for s1 in daily_active_shifts[d1]:
                         for s2 in daily_active_shifts[d2]:
                             model.Add(shifts[(d1, doc, s1)] + shifts[(d2, doc, s2)] <= 1)
 
     holiday_worked = {}
     for doc in doctors:
-        hol_shifts = [shifts[(d, doc, s)] for d in range(1, num_days + 1) if is_holiday(target_year, target_month, d) for s in daily_active_shifts[d]]
+        hol_shifts = []
+        for d in range(1, num_days + 1):
+            if is_holiday(target_year, target_month, d):
+                for s in daily_active_shifts[d]:
+                    if s in NIGHT_SHIFTS + DAY_SHIFTS:
+                        hol_shifts.append(shifts[(d, doc, s)])
         holiday_worked[doc] = sum(hol_shifts)
-        abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d)) + sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
-        model.Add(holiday_worked[doc] <= max(max_hol_shifts_per_doc[doc], abs_hol_count))
-
-    max_hol_shifts = model.NewIntVar(0, num_days * 3, 'max_hol_shifts')
-    for doc in doctors: model.Add(holiday_worked[doc] <= max_hol_shifts)
-
+        
+        abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
+        abs_hol_count += sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
+        actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count) 
+        model.Add(holiday_worked[doc] <= actual_hol_max)
+        
+    global_max = num_days * 3 
+    max_hol_shifts = model.NewIntVar(0, global_max, 'max_hol_shifts')
     for doc in doctors:
-        if req_priority[doc] < 100:
-            weight = req_priority[doc] * 100
+        model.Add(holiday_worked[doc] <= max_hol_shifts)
+        
+    for doc in doctors:
+        if req_priority[doc] < 100:  
+            weight = req_priority[doc] * 100 
             for d in req_days[doc]:
                 if 1 <= d <= num_days:
                     for s in daily_active_shifts[d]:
-                        if (d, doc, s) in shifts: objective_terms.append(shifts[(d, doc, s)] * weight)
+                        if (d, doc, s) in shifts:
+                            objective_terms.append(shifts[(d, doc, s)] * weight)
             for d, s_name in req_specific[doc]:
-                if 1 <= d <= num_days and s_name in daily_active_shifts[d]:
-                    if (d, doc, s_name) in shifts: objective_terms.append(shifts[(d, doc, s_name)] * weight)
-
-    if objective_terms: model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
-    else: model.Minimize(max_hol_shifts)
+                if 1 <= d <= num_days:
+                    if s_name in daily_active_shifts[d]:
+                        if (d, doc, s_name) in shifts:
+                            objective_terms.append(shifts[(d, doc, s_name)] * weight)
+                    
+    if objective_terms:
+        model.Maximize(sum(objective_terms) - max_hol_shifts * 1000)
+    else:
+        model.Minimize(max_hol_shifts)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 60.0
+    solver.parameters.random_seed = random.randint(1, 10000)
     status = solver.Solve(model)
 
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         schedule_list = []
         weekday_ja = ["月", "火", "水", "木", "金", "土", "日"]
+        
         over_cap_warnings = []
+        
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
-            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": "休日" if is_holiday(target_year, target_month, d) else "平日"}
+            day_str = "休日" if is_holiday(target_year, target_month, d) else "平日"
+            row = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": day_str}
+            
             for s in NIGHT_SHIFTS + DAY_SHIFTS:
                 row[s] = "-"
-                if s in daily_active_shifts[d]:
-                    assigned = [doc for doc in doctors if solver.Value(shifts[(d, doc, s)]) == 1]
-                    if assigned: row[s] = "、".join(assigned)
-                    if solver.Value(over_caps[(d, s)]) > 0: over_cap_warnings.append(f"{target_month}/{d} の「{s}」")
+                
+            for s in daily_active_shifts[d]:
+                assigned_docs = []
+                for doc in doctors:
+                    if solver.Value(shifts[(d, doc, s)]) == 1:
+                        assigned_docs.append(doc)
+                if assigned_docs:
+                    row[s] = "、".join(assigned_docs)
+                    
+                if solver.Value(over_caps[(d, s)]) > 0:
+                    over_cap_warnings.append(f"{target_month}/{d}({weekday_ja[date_obj.weekday()]}) の「{s}」枠")
+                    
             schedule_list.append(row)
-        warnings = [f"⚠️ **定員拡張:** {w}" for w in over_cap_warnings] if over_cap_warnings else []
+            
+        warnings = []
+        if over_cap_warnings:
+            warnings.append("⚠️ **【重要】以下の枠は「決定済みシフト」や「優先度100」が重なったため、AIが自動的に定員を拡張（2名以上配置）してシフトを完成させました:**")
+            warnings.extend([f"・{w}" for w in over_cap_warnings])
+            
         return pd.DataFrame(schedule_list), True, warnings, past_worked_dates, future_worked_dates
+    
     else:
-        return None, False, ["条件が厳しすぎます。"], None, None
+        # =========================================================
+        # バックアップ（緩和モデル）
+        # =========================================================
+        reasons = [] 
+        try:
+            relax_model = cp_model.CpModel()
+            r_shifts = {}
+            dummies = {}
+
+            for d in range(1, num_days + 1):
+                for s in daily_active_shifts[d]:
+                    dummies[(d, s)] = relax_model.NewIntVar(0, 10, f'dummy_d{d}_{s}')
+                    for doc in doctors:
+                        r_shifts[(d, doc, s)] = relax_model.NewBoolVar(f'r_shift_d{d}_{doc}_{s}')
+
+            for d in range(1, num_days + 1):
+                for s in daily_active_shifts[d]:
+                    req_count = multi_slots_dict.get((d, s), 1)
+                    fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
+                    actual_req_count = max(req_count, fixed_docs_count)
+                    relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == actual_req_count)
+
+            for doc in doctors:
+                for d in range(1, num_days + 1):
+                    fixed_count = sum(1 for sd, ss in absolute_req_specific[doc] if sd == d and ss in daily_active_shifts[d])
+                    max_shifts_today = max(1, fixed_count)
+                    relax_model.Add(sum(r_shifts[(d, doc, s)] for s in daily_active_shifts[d]) <= max_shifts_today)
+
+                # 緩和モデルでのNG日の処理
+                for d, ng_type in ng_days_dict[doc].items():
+                    if 1 <= d <= num_days:
+                        if ng_type == "全NG":
+                            for s in daily_active_shifts[d]:
+                                relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        elif ng_type == "日NG":
+                            for s in daily_active_shifts[d]:
+                                if s in DAY_SHIFTS:
+                                    relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        elif ng_type == "宿NG":
+                            for s in daily_active_shifts[d]:
+                                if s in NIGHT_SHIFTS:
+                                    relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                for d in range(1, num_days + 1):
+                    date_obj = datetime.date(target_year, target_month, d)
+                    next_date = date_obj + datetime.timedelta(days=1)
+                    
+                    next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
+                    if next_date.year == target_year and next_date.month == target_month:
+                        if next_date.day in custom_holidays:
+                            next_is_hol = True
+                            
+                    if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
+                        for s in NIGHT_SHIFTS:
+                            if s in daily_active_shifts[d]:
+                                relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                for d in absolute_req_days[doc]:
+                    specifics_on_d = [s for sd, s in absolute_req_specific[doc] if sd == d]
+                    if not specifics_on_d:
+                        relax_model.AddExactlyOne(r_shifts[(d, doc, s)] for s in daily_active_shifts[d])
+
+                for d, s_name in absolute_req_specific[doc]:
+                    if s_name in daily_active_shifts[d]:
+                        relax_model.Add(r_shifts[(d, doc, s_name)] == 1)
+
+                for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
+                    worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
+                    if worked:
+                        specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
+                        actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
+                        relax_model.Add(sum(worked) <= actual_max_type)
+
+                worked_all = []
+                for d in range(1, num_days + 1):
+                    for s in daily_active_shifts[d]:
+                        worked_all.append(r_shifts[(d, doc, s)])
+                if worked_all:
+                    all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
+                    actual_max_total = max(max_shifts_total[doc], len(all_abs_dates))
+                    relax_model.Add(sum(worked_all) <= actual_max_total)
+
+                hol_shifts = []
+                for d in range(1, num_days + 1):
+                    if is_holiday(target_year, target_month, d):
+                        for s in daily_active_shifts[d]:
+                            if s in NIGHT_SHIFTS + DAY_SHIFTS:
+                                hol_shifts.append(r_shifts[(d, doc, s)])
+                abs_hol_count = sum(1 for d in absolute_req_days[doc] if is_holiday(target_year, target_month, d))
+                abs_hol_count += sum(1 for d, s in absolute_req_specific[doc] if is_holiday(target_year, target_month, d))
+                actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count)
+                relax_model.Add(sum(hol_shifts) <= actual_hol_max)
+
+                interval = min_intervals[doc]
+                if interval > 0:
+                    all_abs_dates = set(absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]])
+                    for d in range(1, num_days + 1):
+                        if d in all_abs_dates: continue
+                        current_date = datetime.date(target_year, target_month, d)
+
+                        for past_date in past_worked_dates[doc]:
+                            if 0 < (current_date - past_date).days <= interval:
+                                for s in daily_active_shifts[d]: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+                        for future_date in future_worked_dates[doc]:
+                            if 0 < (future_date - current_date).days <= interval:
+                                for s in daily_active_shifts[d]: relax_model.Add(r_shifts[(d, doc, s)] == 0)
+
+                    for d1 in range(1, num_days + 1):
+                        for d2 in range(d1 + 1, min(d1 + interval + 1, num_days + 1)):
+                            if d1 in all_abs_dates or d2 in all_abs_dates: continue
+                            for s1 in daily_active_shifts[d1]:
+                                for s2 in daily_active_shifts[d2]:
+                                    relax_model.Add(r_shifts[(d1, doc, s1)] + r_shifts[(d2, doc, s2)] <= 1)
+
+            relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in daily_active_shifts[d]))
+
+            relax_solver = cp_model.CpSolver()
+            relax_solver.parameters.max_time_in_seconds = 15.0
+            relax_status = relax_solver.Solve(relax_model)
+
+            if relax_status == cp_model.OPTIMAL or relax_status == cp_model.FEASIBLE:
+                bottlenecks = []
+                missing_by_shift = {s: 0 for s in NIGHT_SHIFTS + DAY_SHIFTS}
+                
+                partial_schedule_list = []
+                weekday_ja = ["月", "火", "水", "木", "金", "土", "日"]
+                
+                for d in range(1, num_days + 1):
+                    date_obj = datetime.date(target_year, target_month, d)
+                    day_str = "休日" if is_holiday(target_year, target_month, d) else "平日"
+                    row_dict = {"日付": f"{target_month}/{d}({weekday_ja[date_obj.weekday()]})", "平日/休日": day_str}
+                    
+                    for s in NIGHT_SHIFTS + DAY_SHIFTS:
+                        row_dict[s] = "-"
+                        
+                    for s in daily_active_shifts[d]:
+                        val = relax_solver.Value(dummies[(d, s)])
+                        if val > 0:
+                            bottlenecks.append(f"・{target_month}/{d} の「{s}」")
+                            missing_by_shift[s] += val
+
+                        assigned_docs = []
+                        for doc in doctors:
+                            if relax_solver.Value(r_shifts[(d, doc, s)]) == 1:
+                                assigned_docs.append(doc)
+                        
+                        if val > 0:
+                            assigned_docs.append(f"⚠️不足({val}名)")
+                            
+                        if assigned_docs:
+                            row_dict[s] = "、".join(assigned_docs)
+                            
+                    partial_schedule_list.append(row_dict)
+
+                partial_df = pd.DataFrame(partial_schedule_list)
+
+                if bottlenecks:
+                    reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
+                    reasons.extend(bottlenecks)
+                    reasons.append("")
+                    reasons.append("📊 **【不足している枠の合計】**")
+                    sorted_missing = sorted(missing_by_shift.items(), key=lambda x: x[1], reverse=True)
+                    for s, count in sorted_missing:
+                        if count > 0:
+                            reasons.append(f"・{s}： 計 {count} 枠不足")
+                    
+                return partial_df, False, reasons, past_worked_dates, future_worked_dates
+        except Exception as e:
+            reasons.append(f"⚠️ 部分的なシフト表の作成中にもエラーが発生しました。詳細: {e}")
+
+        return None, False, reasons, None, None
 
 # ==========================================
 # 5. 実行ボタンと結果表示
 # ==========================================
 st.divider()
 st.header("3. シフトの自動生成")
-staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != ''].dropna(subset=['先生の名前']).reset_index(drop=True)
-fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != ''].dropna(subset=['日付']).reset_index(drop=True)
+st.info("💡 **【使い方】** 設定が終わったらボタンを押してください。エラーが出てしまった場合は、各先生の「月間最大回数」を増やしたり、「最低空ける日数」を少なくして条件を少し緩めてから再度お試しください。")
+
+staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
+staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
+
+fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
+fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
 
 if len(staff_df) > 0:
     if st.button("🚀 このデータでシフトを自動生成する", type="primary"):
-        with st.spinner("計算中..."):
-            df_result, success, error_reasons, past_dates, future_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
-            if success:
-                st.session_state['generated_df'] = df_result
-                st.session_state['past_worked_dates'] = past_dates
-                st.session_state['future_worked_dates'] = future_dates
-                st.success("成功！")
-                for w in error_reasons: st.warning(w)
-            else:
-                st.error("作成失敗。条件を緩めてください。")
+        with st.spinner("AIが最適なシフトを計算中...（最大60秒かかります）"):
+            try:
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
+                
+                if success:
+                    st.session_state['generated_df'] = df_result
+                    st.session_state['past_worked_dates'] = past_worked_dates
+                    st.session_state['future_worked_dates'] = future_worked_dates
+                    st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
+                    
+                    if error_reasons:
+                        for warning in error_reasons:
+                            st.warning(warning)
+                            
+                else:
+                    if df_result is not None and not df_result.empty:
+                        st.session_state['generated_df'] = df_result
+                        st.session_state['past_worked_dates'] = past_worked_dates or {}
+                        st.session_state['future_worked_dates'] = future_worked_dates or {}
+                        
+                        st.error("⚠️ **条件が厳しかったため、一部の枠が空いたままの「未完成のシフト表」が作成されました。**")
+                        for reason in error_reasons:
+                            st.write(reason)
+                        st.info("👇 **赤く強調されている「⚠️不足」の枠を手動で調整するか、条件を緩めて再度実行してください。**")
+                    else:
+                        if 'generated_df' in st.session_state:
+                            del st.session_state['generated_df']
+                        st.error("❌ **入力された条件が厳しすぎて、シフトを組むことができませんでした。**")
+                        for reason in error_reasons:
+                            st.write(reason)
+            except Exception as e:
+                st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
 
     if 'generated_df' in st.session_state:
         df_result = st.session_state['generated_df']
+        past_worked_dates = st.session_state.get('past_worked_dates', {})
+        future_worked_dates = st.session_state.get('future_worked_dates', {})
+        
+        shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
         doctors_list = staff_df['先生の名前'].astype(str).tolist()
-        st.subheader("📅 シフト表")
         
-        # ハイライト設定
-        colors = {"🟨": "hl_yellow", "🟥": "hl_red", "🟦": "hl_blue", "🟩": "hl_green"}
-        hl_selected = {}
-        cols_hl = st.columns(4)
-        for idx, (emoji, key) in enumerate(colors.items()):
-            hl_selected[key] = cols_hl[idx].multiselect(emoji, options=doctors_list, key=key)
+        st.subheader("📅 完成したシフト表")
+        
+        table_container = st.container()
+        
+        st.divider()
+        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の医師のシフトを色別でハイライト</span>", unsafe_allow_html=True)
+        st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟨 **黄色**")
+            hl_yellow = st.multiselect("黄色", options=doctors_list, default=[], key="hl_yellow", label_visibility="collapsed")
+            st.text_input("黄色メモ", key="memo_y", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟥 **赤色**")
+            hl_red = st.multiselect("赤色", options=doctors_list, default=[], key="hl_red", label_visibility="collapsed")
+            st.text_input("赤色メモ", key="memo_r", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟦 **水色**")
+            hl_blue = st.multiselect("水色", options=doctors_list, default=[], key="hl_blue", label_visibility="collapsed")
+            st.text_input("水色メモ", key="memo_b", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟩 **緑色**")
+            hl_green = st.multiselect("緑色", options=doctors_list, default=[], key="hl_green", label_visibility="collapsed")
+            st.text_input("緑色メモ", key="memo_g", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟧 **オレンジ**")
+            hl_orange = st.multiselect("オレンジ", options=doctors_list, default=[], key="hl_orange", label_visibility="collapsed")
+            st.text_input("オレンジメモ", key="memo_o", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("🟫 **茶色**")
+            hl_brown = st.multiselect("茶色", options=doctors_list, default=[], key="hl_brown", label_visibility="collapsed")
+            st.text_input("茶色メモ", key="memo_br", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        st.write("")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("🟪 **紫色**")
+            hl_purple = st.multiselect("紫色", options=doctors_list, default=[], key="hl_purple", label_visibility="collapsed")
+            st.text_input("紫色メモ", key="memo_p", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+        with c2:
+            st.markdown("💗 **ピンク**")
+            hl_pink = st.multiselect("ピンク", options=doctors_list, default=[], key="hl_pink", label_visibility="collapsed")
+            st.text_input("ピンクメモ", key="memo_pi", placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+            
+        st.write("") 
 
-        def color_cells(val):
-            for key, color in [("hl_yellow", "#fff200"), ("hl_red", "#ffcccc"), ("hl_blue", "#cce5ff"), ("hl_green", "#ccffcc")]:
-                if any(doc in str(val) for doc in hl_selected[key]): return f'background-color: {color}; font-weight: bold;'
+        def highlight_holidays(row):
+            styles = [''] * len(row)
+            if row['平日/休日'] == '休日':
+                for i, col in enumerate(row.index):
+                    if col in ['日付', '平日/休日']: 
+                        styles[i] = 'color: #ff4b4b; font-weight: bold;'
+            return styles
+        
+        def color_highlighted_doctor(val):
+            val_str = str(val)
+            if val_str == "-" or val_str == "":
+                return ''
+            
+            if "⚠️不足" in val_str:
+                return 'background-color: #ffe6e6; color: #cc0000; font-weight: bold; border: 2px solid #cc0000;'
+            
+            cell_docs = [d.strip() for d in re.split(r'[、,]', val_str)]
+            
+            for doc in cell_docs:
+                if doc in hl_yellow:
+                    return 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ffcc00;'
+                elif doc in hl_red:
+                    return 'background-color: #ffcccc; color: #000000; font-weight: bold; border: 2px solid #ff6666;'
+                elif doc in hl_blue:
+                    return 'background-color: #cce5ff; color: #000000; font-weight: bold; border: 2px solid #66b2ff;'
+                elif doc in hl_green:
+                    return 'background-color: #ccffcc; color: #000000; font-weight: bold; border: 2px solid #66ff66;'
+                elif doc in hl_orange:
+                    return 'background-color: #ffe5b4; color: #000000; font-weight: bold; border: 2px solid #ffb347;'
+                elif doc in hl_brown:
+                    return 'background-color: #e6ccb3; color: #000000; font-weight: bold; border: 2px solid #c68c53;'
+                elif doc in hl_purple:
+                    return 'background-color: #e6ccff; color: #000000; font-weight: bold; border: 2px solid #b366ff;'
+                elif doc in hl_pink:
+                    return 'background-color: #ffccff; color: #000000; font-weight: bold; border: 2px solid #ff66ff;'
             return ''
-
-        styled_df = df_result.style.apply(lambda r: ['color: #ff4b4b' if r['平日/休日'] == '休日' else '' for _ in r], axis=1).map(color_cells, subset=NIGHT_SHIFTS_UI + DAY_SHIFTS_UI)
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
         
-        st.download_button("📥 CSVダウンロード", data=df_result.to_csv(index=False).encode('utf-8-sig'), file_name="shift_result.csv")
-else:
-    st.warning("先生の名前を入力してください。")
+        base_style = df_result.style.apply(highlight_holidays, axis=1)
+        
+        if hasattr(base_style, 'map'):
+            styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
+        else:
+            styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
+        
+        result_height = len(df_result) * 35 + 40
+        
+        with table_container:
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
+        
+        st.divider()
+        st.subheader("📊 医師ごとのシフト回数（実績）")
+        summary_list = []
+        
+        req_days_eval = {}
+        req_spec_eval = {}
+        for index, row in staff_df.iterrows():
+            doc = str(row['先生の名前'])
+            req_days_eval[doc] = []
+            req_spec_eval[doc] = []
+            if '希望日(半角カンマ区切り)' in staff_df.columns:
+                req_str = str(row['希望日(半角カンマ区切り)'])
+                if not (pd.isna(row['希望日(半角カンマ区切り)']) or req_str.strip() == "" or req_str.lower() in ["nan", "none"]):
+                    req_str = req_str.replace('：', ':')
+                    for item in req_str.split(','):
+                        item = item.strip()
+                        if not item: continue
+                        if ':' in item:
+                            parts = item.split(':')
+                            try:
+                                req_spec_eval[doc].append((int(re.sub(r'\D', '', parts[0].strip())), parts[1].strip()))
+                            except:
+                                pass
+                        else:
+                            try:
+                                req_days_eval[doc].append(int(item))
+                            except:
+                                pass
+        
+        for doc in doctors_list:
+            doc_data = {"先生の名前": doc}
+            total_count = 0
+            hol_count = 0
+            
+            doc_working_dates = set()
+            
+            if past_worked_dates and doc in past_worked_dates:
+                doc_working_dates.update(past_worked_dates[doc])
+            if future_worked_dates and doc in future_worked_dates:
+                doc_working_dates.update(future_worked_dates[doc])
+            
+            for d_idx in range(len(df_result)):
+                row = df_result.iloc[d_idx]
+                is_working = False
+                for s in shift_columns:
+                    cell_val = str(row[s])
+                    if doc in [x.strip() for x in re.split(r'[、,]', cell_val)]:
+                        is_working = True
+                        break
+                if is_working:
+                    doc_working_dates.add(datetime.date(year, month, d_idx + 1))
+            
+            for s in shift_columns:
+                count = sum(1 for val in df_result[s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                doc_data[s] = count
+                total_count += count
+                hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
+                        
+            doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
+            doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
+            doc_data["休日回数"] = hol_count
+            doc_data["総合計"] = total_count
+            
+            sorted_dates = sorted(list(doc_working_dates))
+            if len(sorted_dates) >= 2:
+                intervals = [(sorted_dates[i] - sorted_dates[i-1]).days - 1 for i in range(1, len(sorted_dates))]
+                doc_data["最小間隔"] = min(intervals)
+                doc_data["平均間隔"] = sum(intervals) / len(intervals)
+            else:
+                doc_data["最小間隔"] = None
+                doc_data["平均間隔"] = None
+                
+            total_reqs = len(req_days_eval[doc]) + len(req_spec_eval[doc])
+            if total_reqs > 0:
+                current_month_days = [d.day for d in sorted_dates if d.month == month and d.year == year]
+                granted = sum(1 for d in req_days_eval[doc] if d in current_month_days)
+                for req_d, req_s in req_spec_eval[doc]:
+                    if req_d - 1 < len(df_result):
+                        row_result = df_result.iloc[req_d - 1]
+                        if req_s in row_result and doc in [x.strip() for x in re.split(r'[、,]', str(row_result[req_s]))]:
+                            granted += 1
+                doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
+            else:
+                doc_data["希望日達成"] = "-"
+            
+            summary_list.append(doc_data)
+            
+        df_summary = pd.DataFrame(summary_list)
+        df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
+        
+        df_summary = df_summary.set_index('先生の名前')
+        
+        styled_summary = df_summary.style.format(
+            {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
+        ).set_properties(
+            subset=['総合計', '宿直回数', '日直回数'], **{'font-weight': 'bold'}
+        ).set_properties(
+            subset=['希望日達成'], **{'text-align': 'center'}
+        )
+        
+        summary_height = len(df_summary) * 35 + 40
+        st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+        
+        csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 完成したシフト表をCSVでダウンロード",
+            data=csv_result,
+            file_name=f"shift_{year}_{month}_result.csv",
+            mime="text/csv",
+        )
+
+elif len(staff_df) == 0:
+    st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
