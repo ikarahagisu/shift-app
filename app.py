@@ -277,7 +277,7 @@ st.info("""
 💡 **【使い方・入力項目の説明】**
 まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
 
-* **入りにくい曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合は、下のカレンダーで「全NG」にしてください。
+* **入れない曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合は、下のカレンダーで「全NG」にしてください。
 * **NG日**: 下のカレンダーを使って**「全NG」「日NG（日直NG）」「宿NG（宿直NG）」**を直感的に選択できます。
 * **希望日**: `10, 15`（日付のみ）や、`10:宿直A`（枠まで指定）で入力します。
 * **希望優先度**: 絶対外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して【確実】にそのシフトに入ります。（通常は `1` です）
@@ -292,7 +292,7 @@ st.info("""
 
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
-    "入りにくい曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
+    "入れない曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
     "NG日(半角カンマ区切り)": ["", "15:日NG", "10:宿NG", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
@@ -340,7 +340,7 @@ if "先生の名前" in base_df.columns:
 if "希望優先度(数字が大きいほど優先)" in base_df.columns:
     base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
 
-text_cols = ["入りにくい曜日(半角カンマ区切り)", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
+text_cols = ["入れない曜日(半角カンマ区切り)", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
 for c in text_cols:
     if c in base_df.columns:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
@@ -354,8 +354,8 @@ edited_df = st.data_editor(
     use_container_width=True, 
     height=300,
     column_config={
-        "入りにくい曜日(半角カンマ区切り)": st.column_config.TextColumn(
-            "入りにくい曜日",
+        "入れない曜日(半角カンマ区切り)": st.column_config.TextColumn(
+            "入れない曜日",
             help="例: 水,木 (半角カンマ区切りで入力。カレンダーに⚠️が表示されます)"
         ),
         "NG日(半角カンマ区切り)": None, 
@@ -406,7 +406,7 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            hard_str = str(valid_staff.loc[original_idx].get("入りにくい曜日(半角カンマ区切り)", ""))
+            hard_str = str(valid_staff.loc[original_idx].get("入れない曜日(半角カンマ区切り)", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
                 if w in hard_str:
@@ -455,7 +455,7 @@ if not valid_staff.empty:
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入りにくい曜日」には日付の横に ⚠️ マークが表示されています（自動で宿直が外れますが、翌日が休みの場合は入る可能性があります）。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入れない曜日」には日付の横に ⚠️ マークが表示されています（自動で宿直が外れますが、翌日が休みの場合は入る可能性があります）。</span>", unsafe_allow_html=True)
 
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
@@ -569,7 +569,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     req_specific = {}      
     req_priority = {} 
     
-    # 入りにくい曜日の保存用
+    # 入れない曜日の保存用
     hard_weekdays = {}
     
     min_intervals = {}
@@ -627,8 +627,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        # 入りにくい曜日を数値のリストとして取得（月=0, ..., 日=6）
-        hard_str = str(row.get('入りにくい曜日(半角カンマ区切り)', ''))
+        # 入れない曜日を数値のリストとして取得（月=0, ..., 日=6）
+        hard_str = str(row.get('入れない曜日(半角カンマ区切り)', ''))
         hard_days_list = []
         for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
             if w in hard_str:
@@ -766,7 +766,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         if s in NIGHT_SHIFTS:
                             model.Add(shifts[(d, doc, s)] == 0)
 
-    # 入りにくい曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
+    # 入れない曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
