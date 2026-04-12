@@ -474,32 +474,34 @@ if not valid_staff.empty:
                             warning_mark = "⚠️" if is_hard else ""
                             
                             with cols[i]:
-                                # 1. プルダウンの選択状態を先に取得するために、キーの定義を上に移動
                                 chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                                 opts = ["OK", "全NG", "日NG", "宿NG"]
-                                # 万が一セッションに予期せぬ値が入っていたらOKに戻す
                                 if st.session_state[chk_key] not in opts:
                                     st.session_state[chk_key] = "OK"
                                 idx = opts.index(st.session_state[chk_key])
                                 current_ng = st.session_state[chk_key]
                                 
-                                # 2. 選択されているNG状態に応じて、日付の背景色や文字色を変更
-                                if current_ng == "全NG":
-                                    day_text = f"<div style='background-color: #ffe6e6; color: #cc0000; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
-                                elif current_ng == "日NG":
-                                    day_text = f"<div style='background-color: #fff0e6; color: #cc6600; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
-                                elif current_ng == "宿NG":
-                                    day_text = f"<div style='background-color: #e6f2ff; color: #0055cc; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
+                                # 文字色の決定
+                                if is_hol_or_sun:
+                                    text_color = "#ff4b4b"
+                                elif is_sat:
+                                    text_color = "#1e90ff"
                                 else:
-                                    # OKの場合は元の表示（休日・土曜の色分け）を維持
-                                    if is_hol_or_sun:
-                                        day_text = f"<div style='color: #ff4b4b; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px;'>{day}日 {warning_mark}</div>"
-                                    elif is_sat:
-                                        day_text = f"<div style='color: #1e90ff; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px;'>{day}日 {warning_mark}</div>"
-                                    else:
-                                        day_text = f"<div style='font-weight: bold; font-size: 0.85rem; margin-bottom: 2px;'>{day}日 {warning_mark}</div>"
+                                    text_color = "inherit"
+
+                                # 背景色の決定
+                                if current_ng == "全NG":
+                                    bg_color = "#ffe6e6"
+                                elif current_ng == "日NG":
+                                    bg_color = "#fff0e6"
+                                elif current_ng == "宿NG":
+                                    bg_color = "#e6f2ff"
+                                else:
+                                    bg_color = "transparent"
+
+                                day_html = f"<div style='background-color: {bg_color}; color: {text_color}; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
                                 
-                                st.markdown(day_text, unsafe_allow_html=True)
+                                st.markdown(day_html, unsafe_allow_html=True)
                                 st.selectbox(f"{day}日のNG設定", options=opts, index=idx, key=chk_key, label_visibility="collapsed")
                         else:
                             with cols[i]:
