@@ -968,7 +968,14 @@ if len(staff_df) > 0:
                 elif doc in hl_red: return 'background-color: #ffcccc; color: #000000; font-weight: bold; border: 2px solid #ff6666;'
             return ''
         
-        styled_df = df_result.style.apply(highlight_holidays, axis=1).applymap(color_highlighted_doctor, subset=shift_columns)
+        base_style = df_result.style.apply(highlight_holidays, axis=1)
+        
+        # ▼▼▼ 修正箇所：Pandasのバージョンに対応する安全な呼び出し ▼▼▼
+        if hasattr(base_style, 'map'):
+            styled_df = base_style.map(color_highlighted_doctor, subset=shift_columns)
+        else:
+            styled_df = base_style.applymap(color_highlighted_doctor, subset=shift_columns)
+        # ▲▲▲ 修正箇所ここまで ▲▲▲
         
         with table_container:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=(len(df_result) * 35 + 40))
