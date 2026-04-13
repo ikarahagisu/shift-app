@@ -509,15 +509,12 @@ if not valid_staff.empty:
                                 else:
                                     text_color = "inherit"
 
-                                # 背景色の決定
-                                if current_ng == "全NG":
-                                    bg_color = "#ffe6e6"
-                                elif current_ng == "日NG":
-                                    bg_color = "#fff0e6"
-                                elif current_ng == "宿NG":
-                                    bg_color = "#e6f2ff"
+                                # === ここを変更しました（背景色の決定） ===
+                                if current_ng != "OK":
+                                    bg_color = "#ffff99"
                                 else:
                                     bg_color = "transparent"
+                                # ===========================================
 
                                 day_html = f"<div style='background-color: {bg_color}; color: {text_color}; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
                                 
