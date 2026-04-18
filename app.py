@@ -12,30 +12,27 @@ import jpholiday
 # ==========================================
 # 重いCSV読み込みを一瞬で終わらせる魔法（キャッシュ機能）
 # ==========================================
-@st.cache_data
-def parse_staff_csv(file_bytes):
-    # io.BytesIO はread後にポインタが末尾に移動するため、
-    # エンコーディングごとに新しいインスタンスを生成して渡す
-    for encoding in ('shift_jis', 'utf-8-sig', 'utf-8'):
+def _read_csv_any_encoding(file_bytes):
+    """
+    Shift-JIS / UTF-8 BOM / UTF-8 / latin-1 の順に試してDataFrameを返す。
+    io.BytesIO はread後にポインタが末尾へ移動するため、
+    エンコーディングごとに必ず新しいインスタンスを生成する。
+    latin-1 は任意の1バイト列を読めるため実質フォールバックとして機能する。
+    """
+    for encoding in ('cp932', 'shift_jis', 'utf-8-sig', 'utf-8', 'latin-1'):
         try:
-            df = pd.read_csv(io.BytesIO(file_bytes), encoding=encoding)
-            return df
+            return pd.read_csv(io.BytesIO(file_bytes), encoding=encoding)
         except UnicodeDecodeError:
             continue
-    # すべて失敗した場合は errors='replace' で強制読み込み
-    return pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8', errors='replace')
+    raise ValueError("CSVのエンコーディングを判定できませんでした。")
+
+@st.cache_data
+def parse_staff_csv(file_bytes):
+    return _read_csv_any_encoding(file_bytes)
 
 @st.cache_data
 def parse_fixed_csv(file_bytes):
-    for encoding in ('shift_jis', 'utf-8-sig', 'utf-8'):
-        try:
-            df = pd.read_csv(io.BytesIO(file_bytes), encoding=encoding)
-            if '区分' in df.columns:
-                df = df.rename(columns={'区分': '平日/休日'})
-            return df
-        except UnicodeDecodeError:
-            continue
-    df = pd.read_csv(io.BytesIO(file_bytes), encoding='utf-8', errors='replace')
+    df = _read_csv_any_encoding(file_bytes)
     if '区分' in df.columns:
         df = df.rename(columns={'区分': '平日/休日'})
     return df
