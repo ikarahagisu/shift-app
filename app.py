@@ -37,6 +37,64 @@ def parse_fixed_csv(file_bytes):
         df = df.rename(columns={'区分': '平日/休日'})
     return df
 
+def parse_shift_date(date_value, target_year, target_month):
+    """
+    日付文字列を datetime.date に変換する。
+    対応例:
+    - YYYY/M/D, YYYY-MM-DD, YYYY年M月D日
+    - M/D, M-D, M月D日（年は target_year / target_month から推定）
+    """
+    if isinstance(date_value, datetime.datetime):
+        return date_value.date()
+    if isinstance(date_value, datetime.date):
+        return date_value
+    if isinstance(date_value, pd.Timestamp):
+        return date_value.date()
+
+    text = str(date_value).strip()
+    if not text or text.lower() in {"nan", "none"}:
+        return None
+
+    # 年を含む日付は pandas パーサを優先（例: 2026-04-01T00:00:00）
+    has_year = re.search(r'(^|[^\d])\d{4}([^\d]|$)', text) is not None
+    if has_year:
+        parsed = pd.to_datetime(text, errors="coerce")
+        if pd.notna(parsed):
+            return parsed.date()
+
+    # 例: 2026/4/1, 2026-04-01, 2026年4月1日
+    full_match = re.search(r'(\d{4})\s*[/-年.]\s*(\d{1,2})\s*[/-月.]\s*(\d{1,2})', text)
+    if full_match:
+        y, m, d = map(int, full_match.groups())
+        try:
+            return datetime.date(y, m, d)
+        except ValueError:
+            return None
+
+    # 例: 4/1, 4-1, 4月1日
+    short_match = re.search(r'(\d{1,2})\s*[/-月.]\s*(\d{1,2})', text)
+    if not short_match:
+        return None
+
+    m, d = map(int, short_match.groups())
+    if m == target_month:
+        y = target_year
+    elif m == 12 and target_month == 1:
+        y = target_year - 1
+    elif m == 1 and target_month == 12:
+        y = target_year + 1
+    elif m > target_month and (m - target_month) >= 6:
+        y = target_year - 1
+    elif m < target_month and (target_month - m) >= 6:
+        y = target_year + 1
+    else:
+        y = target_year
+
+    try:
+        return datetime.date(y, m, d)
+    except ValueError:
+        return None
+
 # ==========================================
 # カレンダー一括操作用の裏側ロジック
 # ==========================================
@@ -707,42 +765,25 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
     if fixed_df is not None:
         for _, row in fixed_df.iterrows():
-            date_str = str(row.get('日付', ''))
-            match = re.search(r'(\d+)\s*[/月\-]\s*(\d+)', date_str)
-            if match:
-                m = int(match.group(1))
-                d = int(match.group(2))
-                
-                if m == target_month:
-                    y = target_year
-                elif m == 12 and target_month == 1:
-                    y = target_year - 1
-                elif m == 1 and target_month == 12:
-                    y = target_year + 1
-                elif m > target_month and (m - target_month) >= 6: 
-                    y = target_year - 1
-                elif m < target_month and (target_month - m) >= 6:
-                    y = target_year + 1
-                else:
-                    y = target_year
-                
-                try:
-                    date_obj = datetime.date(y, m, d)
-                except ValueError:
-                    continue 
-                    
-                for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
-                    if s_type in row and pd.notna(row[s_type]):
-                        doc_vals = re.split(r'[、,\s]+', str(row[s_type]))
-                        for doc_val in doc_vals:
-                            doc_val = doc_val.strip()
-                            if doc_val in doctors:
-                                if m == target_month:
-                                    absolute_req_specific[doc_val].append((d, s_type))
-                                elif date_obj < datetime.date(target_year, target_month, 1):
-                                    past_worked_dates[doc_val].append(date_obj)
-                                else:
-                                    future_worked_dates[doc_val].append(date_obj)
+            date_obj = parse_shift_date(row.get('日付', ''), target_year, target_month)
+            if date_obj is None:
+                continue
+
+            m = date_obj.month
+            d = date_obj.day
+
+            for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
+                if s_type in row and pd.notna(row[s_type]):
+                    doc_vals = re.split(r'[、,\s]+', str(row[s_type]))
+                    for doc_val in doc_vals:
+                        doc_val = doc_val.strip()
+                        if doc_val in doctors:
+                            if m == target_month:
+                                absolute_req_specific[doc_val].append((d, s_type))
+                            elif date_obj < datetime.date(target_year, target_month, 1):
+                                past_worked_dates[doc_val].append(date_obj)
+                            else:
+                                future_worked_dates[doc_val].append(date_obj)
 
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
