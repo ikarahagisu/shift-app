@@ -371,63 +371,85 @@ custom_holidays = []
 cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-    cols[i].markdown(f"<div style='color: {color}; font-weight: bold;'>{w}</div>", unsafe_allow_html=True)
+    cols[i].markdown(
+        f"<div style='color: {color}; font-weight: bold; text-align: center;'>{w}</div>",
+        unsafe_allow_html=True
+    )
 
 # 日付とチェックボックス
+# 日付部分は平日・休日とも「同じHTML・同じ中央位置」で描画し、
+# その下に平日はチェックボックス、土日祝は「休」を表示する。
+# これにより休日だけ横にずれる現象を防ぐ。
 for week in cal_matrix:
     cols = st.columns(7)
+
     for i, day in enumerate(week):
-        if day != 0:
+        with cols[i]:
+            if day == 0:
+                # 空欄セルも高さをある程度そろえる
+                st.markdown(
+                    "<div style='height: 4.5rem;'></div>",
+                    unsafe_allow_html=True
+                )
+                continue
+
             date_obj = datetime.date(year, month, day)
-            is_weekend_or_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)
-            
-            with cols[i]:
-                if is_weekend_or_hol:
-                    st.markdown(
-                        f"""
-                        <div style='
-                            width: 100%;
-                            box-sizing: border-box;
-                            display: flex;
-                            align-items: flex-start;
-                            justify-content: flex-start;
-                            gap: 11px;
-                            color: #ff4b4b;
-                            padding-top: 7px;
-                        '>
-                            <div style='
-                                width: 24px;
-                                min-width: 24px;
-                                height: 24px;
-                                flex: 0 0 24px;
-                            '></div>
-                            <div style='
-                                display: flex;
-                                flex-direction: column;
-                                align-items: flex-start;
-                                justify-content: flex-start;
-                                gap: 6px;
-                            '>
-                                <b style='font-weight: 600;'>{day}日</b>
-                                <div style='
-                                    height: 1.25rem;
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: flex-start;
-                                '>
-                                    <span style='font-size: 0.8rem;'>休</span>
-                                </div>
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                else:
-                    if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
+            is_weekend_or_hol = (
+                date_obj.weekday() >= 5
+                or jpholiday.is_holiday(date_obj)
+            )
+
+            day_color = "#ff4b4b" if is_weekend_or_hol else "inherit"
+
+            # 日付は全日まったく同じ位置に表示
+            st.markdown(
+                f"""
+                <div style='
+                    width: 100%;
+                    text-align: center;
+                    color: {day_color};
+                    font-weight: 600;
+                    line-height: 1.5;
+                    margin: 0;
+                    padding: 0;
+                '>
+                    {day}日
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            if is_weekend_or_hol:
+                # 土日祝：日付の真下に「休」
+                st.markdown(
+                    """
+                    <div style='
+                        width: 100%;
+                        height: 2.4rem;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: #ff4b4b;
+                        font-size: 0.8rem;
+                        margin: 0;
+                        padding: 0;
+                    '>
+                        休
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            else:
+                # 平日：日付の真下、中央にチェックボックス
+                # チェックの機能自体は従来どおり
+                left_spacer, check_col, right_spacer = st.columns([2, 1, 2], gap="small")
+                with check_col:
+                    if st.checkbox(
+                        f"{day}日を休日扱い",
+                        key=f"hol_{year}_{month}_{day}",
+                        label_visibility="collapsed"
+                    ):
                         custom_holidays.append(day)
-        else:
-            with cols[i]:
-                st.write("")
 
 st.divider()
 
