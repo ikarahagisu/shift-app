@@ -351,6 +351,35 @@ div[data-baseweb="select"] > div {
     box-sizing: border-box !important;
 }
 
+
+/* =========================================================
+   上部「特別休日の設定」カレンダー
+   格子セルの高さを平日・休日・空欄ですべて統一
+   ========================================================= */
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    height: 112px !important;
+    min-height: 112px !important;
+    max-height: 112px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+    height: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* チェックボックスのラベルをチェックのすぐ横に表示 */
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-testid="stVerticalBlockBorderWrapper"]
+div[data-testid="stCheckbox"] label {
+    justify-content: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 # ==============================================================================
@@ -391,35 +420,41 @@ for i, w in enumerate(weekdays_ja):
     )
 
 # 日付とチェックボックス
-# 1日ごとに枠線付きのセルにして、どの日付のチェックか分かりやすくする
+# 1日ごとの格子セルは平日・休日・空欄すべて同じ高さにそろえる
 for week in cal_matrix:
     cols = st.columns(7)
 
     for i, day in enumerate(week):
         with cols[i]:
-            if day == 0:
-                with calendar_cell_container():
+            with calendar_cell_container():
+
+                if day == 0:
+                    # 空欄セルも他の日と同じ高さを保つ
                     st.markdown(
-                        "<div style='min-height: 74px;'></div>",
+                        "<div style='height: 72px;'></div>",
                         unsafe_allow_html=True
                     )
-                continue
+                    continue
 
-            date_obj = datetime.date(year, month, day)
-            is_weekend_or_hol = date_obj.weekday() >= 5 or jpholiday.is_holiday(date_obj)
-            day_color = "#ff4b4b" if is_weekend_or_hol else "inherit"
+                date_obj = datetime.date(year, month, day)
+                is_weekend_or_hol = (
+                    date_obj.weekday() >= 5
+                    or jpholiday.is_holiday(date_obj)
+                )
+                day_color = "#ff4b4b" if is_weekend_or_hol else "inherit"
 
-            with calendar_cell_container():
+                # 日付
                 st.markdown(
                     f"""
                     <div style='
+                        width: 100%;
                         text-align: center;
                         color: {day_color};
                         font-weight: 600;
                         font-size: 0.95rem;
-                        line-height: 1.4;
-                        margin-top: 2px;
-                        margin-bottom: 10px;
+                        line-height: 1.35;
+                        margin: 0 0 8px 0;
+                        padding: 0;
                     '>
                         {day}日
                     </div>
@@ -428,17 +463,20 @@ for week in cal_matrix:
                 )
 
                 if is_weekend_or_hol:
+                    # 休日はチェック欄と同じ高さの領域に「休」を表示
                     st.markdown(
                         """
                         <div style='
-                            min-height: 1.8rem;
+                            width: 100%;
+                            height: 2.35rem;
                             display: flex;
                             align-items: center;
                             justify-content: center;
                             color: #ff4b4b;
                             font-size: 0.85rem;
                             line-height: 1.2;
-                            margin-bottom: 4px;
+                            margin: 0;
+                            padding: 0;
                         '>
                             休
                         </div>
@@ -446,29 +484,12 @@ for week in cal_matrix:
                         unsafe_allow_html=True
                     )
                 else:
-                    checked = st.checkbox(
-                        f"{day}日を休日扱い",
-                        key=f"hol_{year}_{month}_{day}",
-                        label_visibility="collapsed"
-                    )
-                    if checked:
+                    # 「休日にする」をチェックボックスのすぐ横に表示
+                    if st.checkbox(
+                        "休日にする",
+                        key=f"hol_{year}_{month}_{day}"
+                    ):
                         custom_holidays.append(day)
-
-                    st.markdown(
-                        """
-                        <div style='
-                            text-align: center;
-                            color: #888;
-                            font-size: 0.72rem;
-                            line-height: 1.2;
-                            margin-top: -2px;
-                            min-height: 1rem;
-                        '>
-                            休日にする
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
 
 st.divider()
 
