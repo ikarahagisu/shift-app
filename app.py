@@ -389,23 +389,34 @@ for week in cal_matrix:
                             width: 100%;
                             box-sizing: border-box;
                             display: flex;
-                            flex-direction: column;
                             align-items: flex-start;
                             justify-content: flex-start;
-                            gap: 6px;
+                            gap: 11px;
                             color: #ff4b4b;
                             padding-top: 7px;
-                            padding-left: 2.15rem;
                         '>
-                            <b style='font-weight: 600;'>{day}日</b>
                             <div style='
-                                height: 1.25rem;
+                                width: 24px;
+                                min-width: 24px;
+                                height: 24px;
+                                flex: 0 0 24px;
+                            '></div>
+                            <div style='
                                 display: flex;
-                                align-items: center;
+                                flex-direction: column;
+                                align-items: flex-start;
                                 justify-content: flex-start;
-                                padding-left: 0.45rem;
+                                gap: 6px;
                             '>
-                                <span style='font-size: 0.8rem;'>休</span>
+                                <b style='font-weight: 600;'>{day}日</b>
+                                <div style='
+                                    height: 1.25rem;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: flex-start;
+                                '>
+                                    <span style='font-size: 0.8rem;'>休</span>
+                                </div>
                             </div>
                         </div>
                         """,
