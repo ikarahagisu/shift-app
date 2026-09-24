@@ -216,65 +216,127 @@ st.title("当直・日直 自動シフト作成アプリ")
 # === スマホ＆フォーム内で絶対に崩れないカレンダー用CSS ===
 st.markdown("""
 <style>
-/* 7列のブロック（カレンダー）をCSS Gridで絶対に7列維持する */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) {
+
+/* =========================================================
+   フォーム内の7列カレンダー
+   ========================================================= */
+
+/* 7列のブロックを画面幅の中に必ず収める */
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
-    gap: 2px !important;
-    width: 100% !important; 
+    gap: 4px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
     box-sizing: border-box !important;
+    overflow: hidden !important;
 }
 
-/* カレンダーの各マス（セル）のデザイン */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) > div[data-testid="column"] {
-    width: 100% !important;
-    min-width: 0 !important; 
-    box-sizing: border-box !important; 
+/* =========================================================
+   カレンダー各セル
+   ========================================================= */
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+> div[data-testid="column"] {
+    flex: none !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
     border: 1px solid #eee;
     border-radius: 4px;
-    padding: 6px 2px !important; 
+    padding: 6px 2px !important;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start !important; 
+    justify-content: flex-start !important;
     background-color: #ffffff;
-    overflow: hidden; 
+    overflow: hidden !important;
 }
 
-/* Streamlit特有の余計なマージンを消去 */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) .element-container {
+/* =========================================================
+   Streamlit特有の余白を削除
+   ========================================================= */
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+.element-container {
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
     display: flex;
     justify-content: center;
-    width: 100%;
+    box-sizing: border-box !important;
 }
 
-/* スマホ用に文字サイズを調整し、絶対に改行させない */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) p,
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) label,
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-testid="stMarkdownContainer"],
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) span,
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) b {
+/* =========================================================
+   日付・曜日などの文字
+   ========================================================= */
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) p,
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) label,
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-testid="stMarkdownContainer"],
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) span,
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) b {
     font-size: 0.8rem !important;
     text-align: center;
     margin: 0 !important;
     white-space: nowrap !important;
-    word-break: keep-all !important; 
-    line-height: 1.5 !important; 
+    word-break: keep-all !important;
+    line-height: 1.5 !important;
 }
 
-/* プルダウン（Selectbox）を極限までコンパクトに */
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-baseweb="select"] {
-    font-size: 0.75rem !important;
+/* =========================================================
+   Selectbox
+   ========================================================= */
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-testid="stSelectbox"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
 }
-div[data-testid="stHorizontalBlock"]:has(> div:nth-child(7)) div[data-baseweb="select"] > div {
-    padding-top: 0px !important;
-    padding-bottom: 0px !important;
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-baseweb="select"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    font-size: 0.75rem !important;
+    box-sizing: border-box !important;
+}
+
+div[data-testid="stForm"]
+div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+div[data-baseweb="select"] > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
     padding-left: 2px !important;
     padding-right: 2px !important;
     min-height: 1.8rem !important;
+    box-sizing: border-box !important;
 }
+
 </style>
 """, unsafe_allow_html=True)
 # ==============================================================================
