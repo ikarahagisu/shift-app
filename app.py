@@ -382,7 +382,7 @@ weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
 
 # 曜日のヘッダー行
-cols = calendar_columns()
+cols = st.columns(7)
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
     cols[i].markdown(
@@ -393,7 +393,7 @@ for i, w in enumerate(weekdays_ja):
 # 日付とチェックボックス
 # 1日ごとに枠線付きのセルにして、どの日付のチェックか分かりやすくする
 for week in cal_matrix:
-    cols = calendar_columns()
+    cols = st.columns(7)
 
     for i, day in enumerate(week):
         with cols[i]:
