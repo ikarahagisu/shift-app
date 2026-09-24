@@ -789,7 +789,7 @@ if not valid_staff.empty:
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入れない曜日」には日付の横に ⚠️ マークが表示されています（自動で宿直が外れますが、翌日が休みの場合は入る可能性があります）。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 「入れない曜日」には ⚠️ マークが表示されます。原則としてその曜日の宿直は外れますが、翌日が休日の場合は宿直に入る可能性があります。また、⚠️ の日が休日の場合、NG設定をしていなければ日直に入ることがあります。</span>", unsafe_allow_html=True)
 
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
