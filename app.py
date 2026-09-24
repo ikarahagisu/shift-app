@@ -383,7 +383,34 @@ for week in cal_matrix:
             
             with cols[i]:
                 if is_weekend_or_hol:
-                    st.markdown(f"<div style='display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; color: #ff4b4b; padding-top: 7px;'><b style='font-weight: 600;'>{day}日</b><div style='height: 1.25rem; display: flex; align-items: center; justify-content: center;'><span style='font-size: 0.8rem;'>休</span></div></div>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"""
+                        <div style='
+                            width: 100%;
+                            box-sizing: border-box;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: flex-start;
+                            justify-content: flex-start;
+                            gap: 6px;
+                            color: #ff4b4b;
+                            padding-top: 7px;
+                            padding-left: 2.15rem;
+                        '>
+                            <b style='font-weight: 600;'>{day}日</b>
+                            <div style='
+                                height: 1.25rem;
+                                display: flex;
+                                align-items: center;
+                                justify-content: flex-start;
+                                padding-left: 0.45rem;
+                            '>
+                                <span style='font-size: 0.8rem;'>休</span>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                 else:
                     if st.checkbox(f"**{day}日**", key=f"hol_{year}_{month}_{day}"):
                         custom_holidays.append(day)
