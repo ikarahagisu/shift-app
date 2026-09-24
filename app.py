@@ -337,9 +337,135 @@ div[data-baseweb="select"] > div {
     box-sizing: border-box !important;
 }
 
+
+/* =========================================================
+   スマートフォン縦向き対策
+   Streamlitは狭い画面で st.columns を縦積みにするため、
+   「7列のカレンダー」だけは横7列を維持する。
+   現行Streamlitの data-testid="stColumn" と、
+   旧DOM名 data-testid="column" の両方に対応。
+   ========================================================= */
+
+@media (max-width: 640px) {
+
+    /* 上部・下部どちらのカレンダーも7列を維持 */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)),
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) {
+        display: grid !important;
+        grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+        gap: 2px !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+        align-items: start !important;
+    }
+
+    /* 7列カレンダーの各列が100%幅で縦積みになるのを解除 */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    > div[data-testid="stColumn"],
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    > div[data-testid="column"] {
+        flex: none !important;
+        width: auto !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding-left: 1px !important;
+        padding-right: 1px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* カレンダー内の文字を少しコンパクトに */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-testid="stMarkdownContainer"],
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-testid="stMarkdownContainer"] {
+        font-size: 0.75rem !important;
+        line-height: 1.25 !important;
+        min-width: 0 !important;
+    }
+
+    /* 上部カレンダーのチェックボックスを各セル中央へ */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-testid="stCheckbox"],
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-testid="stCheckbox"] {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-testid="stCheckbox"] > label,
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-testid="stCheckbox"] > label {
+        width: 100% !important;
+        display: flex !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    /* 下部NGカレンダーのSelectboxを7列に収まるサイズへ */
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-testid="stSelectbox"],
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-testid="stSelectbox"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-baseweb="select"],
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-baseweb="select"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        font-size: 0.68rem !important;
+    }
+
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7))
+    div[data-baseweb="select"] > div,
+    div[data-testid="stForm"]
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
+    div[data-baseweb="select"] > div {
+        min-width: 0 !important;
+        min-height: 1.7rem !important;
+        padding-left: 2px !important;
+        padding-right: 0 !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 日付と警告マークが改行しにくいようにする */
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="stColumn"]:nth-child(7)) b,
+    div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) b {
+        white-space: nowrap !important;
+        font-size: 0.72rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 # ==============================================================================
+
+
+def calendar_columns():
+    """
+    カレンダー専用の7列。
+    Streamlit 1.62以降では wrap=False でスマホでも縦積みを防ぐ。
+    古いStreamlitではCSS側のスマホ対策を使う。
+    """
+    try:
+        return st.columns(7, gap="xsmall", wrap=False)
+    except TypeError:
+        return st.columns(7, gap="small")
 
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
@@ -368,7 +494,7 @@ weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
 custom_holidays = []
 
 # 曜日のヘッダー行
-cols = st.columns(7)
+cols = calendar_columns()
 for i, w in enumerate(weekdays_ja):
     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
     cols[i].markdown(
@@ -381,7 +507,7 @@ for i, w in enumerate(weekdays_ja):
 # その下に平日はチェックボックス、土日祝は「休」を表示する。
 # これにより休日だけ横にずれる現象を防ぐ。
 for week in cal_matrix:
-    cols = st.columns(7)
+    cols = calendar_columns()
 
     for i, day in enumerate(week):
         with cols[i]:
@@ -440,16 +566,15 @@ for week in cal_matrix:
                     unsafe_allow_html=True
                 )
             else:
-                # 平日：日付の真下、中央にチェックボックス
-                # チェックの機能自体は従来どおり
-                left_spacer, check_col, right_spacer = st.columns([2, 1, 2], gap="small")
-                with check_col:
-                    if st.checkbox(
-                        f"{day}日を休日扱い",
-                        key=f"hol_{year}_{month}_{day}",
-                        label_visibility="collapsed"
-                    ):
-                        custom_holidays.append(day)
+                # 平日：日付の真下にチェックボックス
+                # 入れ子のst.columnsはスマホで縦積みになるため使わず、
+                # CSSでセル中央に配置する。
+                if st.checkbox(
+                    f"{day}日を休日扱い",
+                    key=f"hol_{year}_{month}_{day}",
+                    label_visibility="collapsed"
+                ):
+                    custom_holidays.append(day)
 
 st.divider()
 
@@ -751,13 +876,13 @@ if not valid_staff.empty:
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 設定された「入れない曜日」には日付の横に ⚠️ マークが表示されています（自動で宿直が外れますが、翌日が休みの場合は入る可能性があります）。</span>", unsafe_allow_html=True)
 
-                cols = st.columns(7)
+                cols = calendar_columns()
                 for i, w in enumerate(weekdays_ja):
                     color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
                     cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
                 
                 for week in cal_matrix:
-                    cols = st.columns(7)
+                    cols = calendar_columns()
                     for i, day in enumerate(week):
                         if day != 0:
                             date_obj = datetime.date(year, month, day)
