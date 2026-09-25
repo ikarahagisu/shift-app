@@ -28,7 +28,20 @@ def _read_csv_any_encoding(file_bytes):
 
 @st.cache_data
 def parse_staff_csv(file_bytes):
-    return _read_csv_any_encoding(file_bytes)
+    df = _read_csv_any_encoding(file_bytes)
+    # 旧CSVの列名も受け付け、画面・出力CSVでは新名称に統一する。
+    weekday_column = "原則、宿直を外す曜日"
+    for old_column in ("入れない曜日(半角カンマ区切り)", "入れない曜日"):
+        if old_column not in df.columns:
+            continue
+        if weekday_column not in df.columns:
+            df = df.rename(columns={old_column: weekday_column})
+        else:
+            # 両方の列がある場合は新名称の値を優先し、空欄だけ旧列で補う。
+            blank = df[weekday_column].fillna("").astype(str).str.strip().eq("")
+            df.loc[blank, weekday_column] = df.loc[blank, old_column]
+            df = df.drop(columns=[old_column])
+    return df
 
 @st.cache_data
 def parse_fixed_csv(file_bytes):
@@ -670,7 +683,7 @@ with st.expander("希望優先度：通常の希望と、100以上の特別な�
 
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
-    "入れない曜日(半角カンマ区切り)": ["水,木", "", "土,日", "", ""],
+    "原則、宿直を外す曜日": ["水,木", "", "土,日", "", ""],
     "NG日(半角カンマ区切り)": ["", "15:日NG", "10:宿NG", "", ""],
     "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
@@ -718,7 +731,7 @@ if "先生の名前" in base_df.columns:
 if "希望優先度(数字が大きいほど優先)" in base_df.columns:
     base_df["希望優先度(数字が大きいほど優先)"] = pd.to_numeric(base_df["希望優先度(数字が大きいほど優先)"], errors='coerce')
 
-text_cols = ["入れない曜日(半角カンマ区切り)", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
+text_cols = ["原則、宿直を外す曜日", "NG日(半角カンマ区切り)", "希望日(半角カンマ区切り)", "備考（メモ・説明など自由記入）"]
 for c in text_cols:
     if c in base_df.columns:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
@@ -732,7 +745,7 @@ edited_df = st.data_editor(
     use_container_width=True, 
     height=300,
     column_config={
-        "入れない曜日(半角カンマ区切り)": st.column_config.TextColumn(
+        "原則、宿直を外す曜日": st.column_config.TextColumn(
             "原則、宿直を外す曜日",
             help="例：水,木。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
         ),
@@ -811,7 +824,7 @@ if not valid_staff.empty:
         original_idx = valid_staff.index[t_idx]
         with tabs[t_idx]:
             
-            hard_str = str(valid_staff.loc[original_idx].get("入れない曜日(半角カンマ区切り)", ""))
+            hard_str = str(valid_staff.loc[original_idx].get("原則、宿直を外す曜日", ""))
             hard_days = []
             for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
                 if w in hard_str:
@@ -1022,7 +1035,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     for index, row in staff_df.iterrows():
         doc = str(row['先生の名前'])
         
-        hard_str = str(row.get('入れない曜日(半角カンマ区切り)', ''))
+        hard_str = str(row.get('原則、宿直を外す曜日', ''))
         hard_days_list = []
         for i, w in enumerate(["月", "火", "水", "木", "金", "土", "日"]):
             if w in hard_str:
@@ -1160,7 +1173,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         if s in NIGHT_SHIFTS:
                             model.Add(shifts[(d, doc, s)] == 0)
 
-    # 入れない曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
+    # 原則、宿直を外す曜日は「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
