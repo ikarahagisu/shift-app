@@ -1099,7 +1099,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 if next_date.day in custom_holidays:
                     next_is_hol = True
                     
-            if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
+            if (
+                date_obj.weekday() in hard_weekdays[doc]
+                and not next_is_hol
+                and d not in absolute_req_days[doc]
+                and not any(sd == d for sd, _ in absolute_req_specific[doc])
+            ):
                 for s in NIGHT_SHIFTS:
                     if s in daily_active_shifts[d]:
                         model.Add(shifts[(d, doc, s)] == 0)
@@ -1286,7 +1291,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         if next_date.day in custom_holidays:
                             next_is_hol = True
                             
-                    if date_obj.weekday() in hard_weekdays[doc] and not next_is_hol:
+                    if (
+                        date_obj.weekday() in hard_weekdays[doc]
+                        and not next_is_hol
+                        and d not in absolute_req_days[doc]
+                        and not any(sd == d for sd, _ in absolute_req_specific[doc])
+                    ):
                         for s in NIGHT_SHIFTS:
                             if s in daily_active_shifts[d]:
                                 relax_model.Add(r_shifts[(d, doc, s)] == 0)
