@@ -212,6 +212,18 @@ def add_interval_constraints(
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
+st.caption("年月・勤務条件・NG日を入力して、シフト表の案を作成します。")
+with st.expander("初めて使う方へ：入力からダウンロードまで", expanded=False):
+    st.markdown("""
+1. **年月・休日・必要人数を設定**します。
+2. 必要に応じて、**先月末の勤務や今月の確定済みシフト**を入力します。
+3. **医師ごとの回数・勤務間隔・希望日**を入力します。
+4. 各医師のカレンダーで**NG日を選び、「NG日を反映する」**を押します。
+5. **「シフト案を作成する」**を押し、結果を確認してCSVをダウンロードします。
+
+途中で終了する場合は、下の「医師条件をCSVで保存」をご利用ください。
+特別休日・増員設定・確定済みシフトは、そのCSVには含まれません。
+    """)
 
 
 def calendar_cell_container():
@@ -387,8 +399,8 @@ div[data-testid="stCheckbox"] label {
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
-st.header("📅 作成するシフトの設定")
-st.info("💡 **【使い方】** 作成したい年・月を選びます。年末年始やお盆など、平日でも日直が必要な日を「休日扱い」にしたい場合はカレンダーのチェックをオンにしてください。GWなどで特定の枠を「2名以上」に増やしたい場合は、下の表で増員設定を行います。")
+st.header("📅 年月・休日・必要人数の設定")
+st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
 
 today = datetime.date.today()
 if today.month == 12:
@@ -404,7 +416,8 @@ month = col_m.number_input("月", min_value=1, max_value=12, value=default_month
 
 st.divider()
 
-st.subheader(f"📅 カレンダー確認 （特別休日の設定） - {month}月")
+st.subheader(f"📅 平日に日直を設ける日（特別休日） - {month}月")
+st.caption("年末年始やお盆など、平日でも日直が必要な日を指定します。チェックした日は、日直・宿直ともに休日回数の集計対象になります。")
 
 cal_matrix = calendar.monthcalendar(year, month)
 weekdays_ja = ["月", "火", "水", "木", "金", "土", "日"]
@@ -493,7 +506,9 @@ for week in cal_matrix:
 
 st.divider()
 
-st.subheader("👥 複数人シフト（増員）の設定")
+st.subheader("👥 1つの枠を2名以上にする設定（任意）")
+st.info("通常は各枠1名です。増員する場合だけ行を追加し、日付・枠・合計人数を選んでください。2名体制にしたい場合は「2」を入力します。")
+st.caption("日直の増員は休日扱いの日に設定してください。平日に日直を設ける場合は、先に上のカレンダーで「休日にする」にチェックを入れます。")
 
 _, num_days = calendar.monthrange(year, month)
 NIGHT_SHIFTS_UI = ['宿直A', '宿直B', '外来宿直']
@@ -512,7 +527,7 @@ edited_multi_df = st.data_editor(
     column_config={
         "日付": st.column_config.SelectboxColumn("日付を選択", options=date_options, required=True),
         "シフト枠": st.column_config.SelectboxColumn("増員する枠を選択", options=shift_options, required=True),
-        "人数": st.column_config.NumberColumn("人数を指定", min_value=2, max_value=10, step=1, required=True)
+        "人数": st.column_config.NumberColumn("合計人数", help="追加人数ではなく、その枠に配置する合計人数です。例：1名から2名体制にする場合は2。", min_value=2, max_value=10, step=1, required=True)
     }
 )
 
@@ -566,8 +581,17 @@ st.divider()
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
 
-st.header("1. 過去・決定済みシフトの読み込み・入力（任意）")
-st.info("💡 **【使い方】** 先月末のシフト表をアップロードすれば、月初の間隔（連投禁止）ルールを正確に考慮できます。また、今月のシフトで「すでに人間が確定させた枠」があれば入力してください。AIが残りの空き枠だけを計算して埋めてくれます。")
+st.header("1. 先月末・今月の確定済みシフトを入力（任意）")
+st.info("先月末の勤務は、月初の勤務間隔を確認するために使います。今月すでに担当者が決まっている枠も、ここに入力してください。入力がなければ、この項目は飛ばせます。")
+with st.expander("確定済みシフトの入力例と扱い", expanded=False):
+    st.markdown("""
+- CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
+- 日付は `2026/10/1` または `10/1` の形式で入力します。
+- 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
+- 現在の読み込みでは空白も区切りとして扱われるため、名前は空白を含めず、医師条件側も同じ表記にそろえてください。
+- 未確定の枠は空欄で構いません。「平日/休日」欄ではなく、上部のカレンダー設定で休日を判定します。
+- 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務の前後は勤務間隔の制限対象から外れるため、結果をご確認ください。
+    """)
 
 fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
 fixed_template_df = pd.DataFrame(columns=fixed_columns)
@@ -598,8 +622,8 @@ else:
 if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
-st.markdown("##### 📅 決定済みシフトの入力・編集")
-st.write("※CSVを使わずに、下の表へ直接クリックして「4/1」のように日付と先生の名前を手打ちすることもできます。")
+st.markdown("##### 📅 先月末・今月の確定済みシフト")
+st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
 edited_fixed_df = edited_fixed_df_raw.reset_index()
@@ -607,22 +631,42 @@ edited_fixed_df = edited_fixed_df_raw.reset_index()
 st.divider()
 
 st.header("2. 医師条件の読み込み・入力（必須）")
-st.info("""
-💡 **【使い方・入力項目の説明】**
-まずは「ひな形（CSV）」をダウンロードしてExcelで基本情報を入力・アップロードするのが便利です。
+st.info("下の表に医師ごとの条件を入力してください。CSVを使う場合は、ひな形をダウンロードして編集し、アップロードします。NG日は、この後の医師別カレンダーで設定します。")
+st.caption("最初に表示される5名は入力例です。実際の医師名・条件に置き換えてください。希望優先度は通常「1」を使用します。")
+with st.expander("入力例：曜日・希望日・備考", expanded=False):
+    st.markdown("""
+| 項目 | 入力方法・意味 |
+| --- | --- |
+| 原則、宿直を外す曜日 | `水,木` のように半角カンマで区切ります。指定曜日でも翌日が休日なら宿直に入る場合があります。日直は対象外です。 |
+| 希望日 | `10,15` はその日のいずれかの枠、`10:宿直A` はその枠を希望します。複数の希望は半角カンマで区切ります。 |
+| 指定できる枠 | 宿直A・宿直B・外来宿直・日直A・日直B・外来日直。表記を一致させてください。 |
+| 備考 | 管理用のメモです。「学会」などと書いても計算条件には反映されません。休みはNG日で指定してください。 |
 
-* **入れない曜日**: `水,木` のように入力すると、その曜日は自動的に「宿直なし（日直はあり）」として計算されます。**ただし、翌日が休日の場合は宿直に入る可能性があります（当直明けが休みになるため）。**日直も含めて1日完全に休みたい場合は、下のカレンダーで「全NG」にしてください。
-* **NG日**: 下のカレンダーを使って休日は「全NG」「日NG」「宿NG」、平日は「宿NG」を直感的に選択できます。
-* **希望日**: `10, 15`（日付のみ）や、`10:宿直A`（枠まで指定）で入力します。
-* **希望優先度**: 絶対外せない希望がある場合は `100` 以上の数字を入れると、回数上限などのルールを無視して【確実】にそのシフトに入ります。（通常は `1` です）
-* **各種ルールについて**:
-    * **最低空ける日数**: 勤務と勤務の間を最低何日空けるかを指定します。
-    * **月間最小回数 / 月間最大回数**: その月に割り当てる総シフト数の下限と上限です。
-    * **休日最大回数**: 土日祝などの「休日扱い」の日に割り当てる最大回数です。
-    * **各枠の上限（宿直A上限、日直B上限など）**: 特定のシフト枠ごとに入る最大回数です。
-    * ⚠️ **【重要】**: 通常の「希望日（優先度1など）」は、これらのルールを満たす範囲内でのみ叶えられます。ルールと矛盾する希望は反映されないためご注意ください。
-* **備考**: 管理用のメモ欄です。「学会のため休み多め」など自由にご記入ください（AIの計算には影響しません）。
-""")
+曜日にかかわらず勤務できない日は、カレンダーでNGを指定します。
+平日は「宿NG」、休日に日直・宿直とも勤務できない場合は「全NG」を選んでください。
+    """)
+with st.expander("回数・勤務間隔の数え方", expanded=False):
+    st.markdown("""
+| 項目 | 意味・入力例 |
+| --- | --- |
+| 最低空ける日数 | 勤務と次の勤務の間に空ける日数です。5日なら、10日の次は16日以降です。 |
+| 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
+| 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
+| 休日最大回数 | 土日祝日・特別休日に担当する日直と宿直の合計上限です。 |
+| 各枠の上限 | 宿直Aなど、それぞれの枠を担当する月間の上限です。 |
+
+1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
+月間最小回数は、月間最大回数以下に設定してください。
+確定済みシフトや優先度100以上の希望がある場合は、上限・間隔の例外があります。
+    """)
+with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
+    st.markdown("""
+- **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
+- **100以上は、その医師の希望日すべてを確定扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
+- 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と前後の勤務との間隔も制限対象から外れます。
+- 一部の勤務だけを確定させたい場合は、上の「確定済みシフト」へ入力し、希望優先度は通常の値にしてください。
+- 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に確定勤務が反映されているか確認してください。
+    """)
 
 template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
@@ -680,7 +724,7 @@ for c in text_cols:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
 st.markdown("##### 👩‍⚕️ 医師条件の入力・編集")
-st.write("※以下の表は直接クリックして文字を入力できます。（ヘッダーの列名にマウスを合わせるとヒントが出ます）")
+st.write("セルをクリックして編集できます。列名にマウスを合わせると、入力例や説明が表示されます。医師名は重複しない表記にしてください。")
 
 edited_df = st.data_editor(
     base_df, 
@@ -689,28 +733,39 @@ edited_df = st.data_editor(
     height=300,
     column_config={
         "入れない曜日(半角カンマ区切り)": st.column_config.TextColumn(
-            "入れない曜日",
-            help="例: 水,木 (半角カンマ区切りで入力。カレンダーに⚠️が表示されます)"
+            "原則、宿直を外す曜日",
+            help="例：水,木。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
         ),
+        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務は例外です。"),
+        "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
+        "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
+        "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝・特別休日の日直と宿直の合計上限です。1枠を1回と数えます。"),
+        "宿直A上限": st.column_config.NumberColumn("宿直A上限", help="宿直Aを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "宿直B上限": st.column_config.NumberColumn("宿直B上限", help="宿直Bを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "外来宿直上限": st.column_config.NumberColumn("外来宿直上限", help="外来宿直を担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "日直A上限": st.column_config.NumberColumn("日直A上限", help="日直Aを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "日直B上限": st.column_config.NumberColumn("日直B上限", help="日直Bを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "外来日直上限": st.column_config.NumberColumn("外来日直上限", help="外来日直を担当する月間の上限です。確定指定がある場合は例外があります。"),
         "NG日(半角カンマ区切り)": None, 
         "希望日(半角カンマ区切り)": st.column_config.TextColumn(
             "希望日",
-            help="例: 10, 15 または 10:宿直A (半角カンマ区切りで入力)"
+            help="例：10,15 または 10:宿直A。複数は半角カンマ区切り。通常の希望は各種条件の範囲内で割り当てます。"
         ),
         "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
             "希望優先度",
-            help="数字が大きいほど優先（100以上で絶対希望）"
+            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの医師の希望日すべてが確定扱いになり、NG・上限・間隔の例外になります。"
         ),
         "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
             "備考",
-            help="メモ・説明など自由記入"
+            help="管理用メモです。ここに書いた内容は計算に反映されません。"
         )
     }
 )
 
 staff_df = edited_df.reset_index()
 
-st.markdown("##### ⚖️ シフト枠と医師の余裕度チェック")
+st.markdown("##### ⚖️ 必要枠数と担当可能回数の目安")
+st.caption("月間最大回数の合計と必要枠数を比較しています。プラスでも、NG日・勤務間隔・枠別上限などによっては埋まらない場合があります。確定指定で追加される枠や上限の例外は、この目安に含まれません。")
 
 if "月間最大回数" in staff_df.columns:
     total_max_capacity = pd.to_numeric(staff_df["月間最大回数"], errors='coerce').fillna(0).sum()
@@ -723,13 +778,29 @@ if "月間最大回数" in staff_df.columns:
     c2.metric("👩‍⚕️ 医師の月間最大回数の合計", f"{total_max_capacity} 回分")
     
     if margin >= 0:
-        c3.metric("✨ 枠の余裕度（バッファ）", f"+{margin} 回分")
+        c3.metric("✨ 担当可能回数 − 必要枠数", f"+{margin} 回分")
     else:
-        c3.metric("🚨 枠の余裕度（バッファ）", f"{margin} 回分", delta_color="inverse")
+        c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
 st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
-st.info("💡 **【使い方】** カレンダー内のプルダウンから休日は「OK」「全NG」「日NG」「宿NG」、平日は「OK」「宿NG」を選べます。選び終わったら、必ず赤い「NG日を確定する」ボタンを押して保存してください。")
+st.info("医師名のタブを選び、勤務できない日を設定してください。選び終わったら、その医師の「NG日を反映する」を押してから、別の操作へ進んでください。")
+with st.expander("NGの種類・一括操作について", expanded=False):
+    st.markdown("""
+| 選択肢 | 意味 |
+| --- | --- |
+| OK | この日についてNGを指定しません。曜日・回数など、ほかの条件は適用されます。 |
+| 全NG | 日直・宿直ともに勤務できません。休日で選べます。 |
+| 日NG | 日直に勤務できません。宿直は候補になります。休日で選べます。 |
+| 宿NG | 宿直に勤務できません。休日なら日直は候補になります。 |
+
+平日は「OK」「宿NG」から選びます。
+「全日NGにする」は平日を宿NG、休日を全NGにし、「すべてOKに戻す」はNG指定を解除します。
+一括操作は押すと反映されます。確定済みシフト・優先度100以上の希望は、NGより優先されます。
+
+**「反映」は、今開いている画面の計算条件への反映です。**
+次回も使う場合は、下の「医師条件をCSVで保存」をご利用ください。
+    """)
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -783,13 +854,13 @@ if not valid_staff.empty:
                 elif val == "宿NG": saved_strs.append(f"{d}日(宿直NG)")
                 
             if saved_strs:
-                st.success(f"✅ **保存済みのNG日:** {', '.join(saved_strs)}")
+                st.success(f"✅ **反映済みのNG日:** {', '.join(saved_strs)}")
             else:
-                st.info("💡 **保存済みのNG日はありません**")
+                st.info("💡 **現在、反映されているNG日はありません**")
 
             with st.form(key=f"ng_form_{original_idx}", border=False):
                 if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>💡 「入れない曜日」には ⚠️ マークが表示されます。原則としてその曜日の宿直は外れますが、翌日が休日の場合は宿直に入る可能性があります。また、⚠️ の日が休日の場合、NG設定をしていなければ日直に入ることがあります。</span>", unsafe_allow_html=True)
+                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
 
                 cols = st.columns(7)
                 for i, w in enumerate(weekdays_ja):
@@ -850,13 +921,13 @@ if not valid_staff.empty:
                             with cols[i]:
                                 st.write("")
                 
-                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を確定する", type="primary")
+                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を反映する", type="primary")
             
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
-                st.button("全選択(NG)", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
+                st.button("全日NGにする", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
             with col_btn2:
-                st.button("全解除(OK)", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
+                st.button("すべてOKに戻す", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
             
             # DataFrameへ状態を保存
             ng_items = []
@@ -870,15 +941,16 @@ if not valid_staff.empty:
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(ng_items)
             
             if submitted:
-                st.toast(f"✅ {doc_name}先生のNG日を保存しました！")
+                st.toast(f"✅ {doc_name}先生のNG日を計算条件に反映しました。")
 
 st.divider()
-st.markdown("##### 📂 入力途中のデータを一時保存（後で再開したい場合）")
-st.write("※途中で入力をやめる場合は、ここまでのデータを保存しておき、次回アップロードすることで続きから再開できます。")
+st.markdown("##### 📂 医師条件をCSVで保存（次回も使う場合）")
+st.write("医師名・回数・勤務間隔・希望日・反映済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
+st.caption("保存前に、各医師のNG日を反映してください。対象年月・特別休日・増員設定・確定済みシフト・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
 current_csv = staff_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
-    label="📥 現在の医師条件を一時保存する（CSVダウンロード）",
+    label="📥 医師条件をCSVで保存",
     data=current_csv,
     file_name=f"staff_wip_{year}_{month}.csv",
     mime="text/csv",
@@ -1417,8 +1489,16 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 # 5. 実行ボタンと結果表示
 # ==========================================
 st.divider()
-st.header("3. シフトの自動生成")
-st.info("💡 **【使い方】** 設定が終わったらボタンを押してください。エラーが出てしまった場合は、各先生の「月間最大回数」を増やしたり、「最低空ける日数」を少なくして条件を少し緩めてから再度お試しください。")
+st.header("3. シフト案の作成・確認")
+st.info("各医師のNG日を反映したら、「シフト案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
+st.caption("年月や入力条件を変更しても、表示中の結果は自動更新されません。変更後は必ず再作成してください。")
+with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
+    st.markdown("""
+- 表に「⚠️不足」と表示された枠は、必要人数を満たしていません。
+- 入力内容を確認し、実際に調整できる範囲で、月間・休日・枠別の上限や勤務間隔を見直して再作成してください。
+- 時間内にシフト案を見つけられない場合もあります。
+- 結果表は、この画面では直接編集できません。手動調整する場合はCSVをダウンロードし、Excelなどで編集してください。
+    """)
 
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
@@ -1427,8 +1507,8 @@ fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != 
 fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
 
 if len(staff_df) > 0:
-    if st.button("🚀 このデータでシフトを自動生成する", type="primary"):
-        with st.spinner("AIが最適なシフトを計算中...（最大60秒かかります）"):
+    if st.button("🚀 この条件でシフト案を作成する", type="primary"):
+        with st.spinner("シフト案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
                 
@@ -1436,7 +1516,7 @@ if len(staff_df) > 0:
                     st.session_state['generated_df'] = df_result
                     st.session_state['past_worked_dates'] = past_worked_dates
                     st.session_state['future_worked_dates'] = future_worked_dates
-                    st.success("✨ シフトの作成に成功しました！個人のルール（間隔・回数）を厳守し、優先度100以上の絶対希望や確定シフトは全て確約されています。")
+                    st.success("✨ 必要人数を満たすシフト案ができました。確定勤務・勤務間隔・各種回数・希望日の反映を確認してください。月間最小回数は未達の場合があり、確定指定には上限・間隔の例外があります。")
                     
                     if error_reasons:
                         for warning in error_reasons:
@@ -1448,14 +1528,14 @@ if len(staff_df) > 0:
                         st.session_state['past_worked_dates'] = past_worked_dates or {}
                         st.session_state['future_worked_dates'] = future_worked_dates or {}
                         
-                        st.error("⚠️ **条件が厳しかったため、一部の枠が空いたままの「未完成のシフト表」が作成されました。**")
+                        st.error("⚠️ **不足枠を含むシフト案です。赤い「⚠️不足」の人数を確認してください。**")
                         for reason in error_reasons:
                             st.write(reason)
-                        st.info("👇 **赤く強調されている「⚠️不足」の枠を手動で調整するか、条件を緩めて再度実行してください。**")
+                        st.info("👇 条件を見直して再作成するか、CSVをダウンロードしてExcelなどで不足枠を調整してください。")
                     else:
                         if 'generated_df' in st.session_state:
                             del st.session_state['generated_df']
-                        st.error("❌ **入力された条件が厳しすぎて、シフトを組むことができませんでした。**")
+                        st.error("❌ **今回はシフト案を作成できませんでした。表示された内容と入力条件を確認してください。**")
                         for reason in error_reasons:
                             st.write(reason)
             except Exception as e:
@@ -1469,7 +1549,7 @@ if len(staff_df) > 0:
         shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
         doctors_list = staff_df['先生の名前'].astype(str).tolist()
         
-        st.subheader("📅 完成したシフト表")
+        st.subheader("📅 作成したシフト案")
         
         table_container = st.container()
         
@@ -1568,7 +1648,8 @@ if len(staff_df) > 0:
             st.dataframe(styled_df, use_container_width=True, hide_index=True, height=result_height)
         
         st.divider()
-        st.subheader("📊 医師ごとのシフト回数（実績）")
+        st.subheader("📊 シフト案の担当回数・希望日・勤務間隔")
+        st.caption("回数は作成したシフト案の集計です。最小・平均間隔は読み込んだ月外の勤務も含む、勤務日と次の勤務日の間の日数です。同じ日の複数勤務は、間隔の集計では1日として扱います。")
         summary_list = []
         
         req_days_eval = {}
@@ -1672,7 +1753,7 @@ if len(staff_df) > 0:
         
         csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 完成したシフト表をCSVでダウンロード",
+            label="📥 表示中のシフト案をCSVでダウンロード",
             data=csv_result,
             file_name=f"shift_{year}_{month}_result.csv",
             mime="text/csv",
