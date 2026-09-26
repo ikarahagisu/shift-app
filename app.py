@@ -231,7 +231,7 @@ with st.expander("初めて使う方へ：入力からダウンロードまで",
 1. **年月・休日・必要人数を設定**します。
 2. 必要に応じて、**先月末の勤務や今月の確定済みシフト**を入力します。
 3. **医師ごとの回数・勤務間隔・希望日**を入力します。
-4. 各医師のカレンダーで**NG日を選びます（選択すると自動で反映されます）。**
+4. 各医師のカレンダーで**NG日を選び、最後に「NG日を反映する」を押します。**
 5. **「シフト案を作成する」**を押し、結果を確認してCSVをダウンロードします。
 
 途中で終了する場合は、下の「医師条件をCSVで保存」をご利用ください。
@@ -414,19 +414,19 @@ div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] {
 }
 div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div {
     width: auto !important; min-width: 0 !important;
-    padding: 4px !important; border: 2px solid #E5E7EB;
+    padding: 4px !important; border: 2px solid #E5E7EB !important;
     border-radius: 8px; background: #FFFFFF; box-sizing: border-box;
 }
 div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="全NG"]) {
-    background: #FDE8EC; border-color: #B42332;
+    background: #FDE8EC; border-color: #B42332 !important;
     box-shadow: inset 0 0 0 1px #B42332;
 }
 div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="日NG"]) {
-    background: #FFF0D9; border-color: #9A4700;
+    background: #FFF0D9; border-color: #9A4700 !important;
     box-shadow: inset 0 0 0 1px #9A4700;
 }
 div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="宿NG"]) {
-    background: #E3EFFF; border-color: #1856A4;
+    background: #E3EFFF; border-color: #1856A4 !important;
     box-shadow: inset 0 0 0 1px #1856A4;
 }
 div[class*="st-key-ng_calendar_"] [data-baseweb="select"] > div {
@@ -829,7 +829,7 @@ st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.caption("✕ 全NG：日直・宿直とも不可　｜　☀ 日NG：日直のみ不可　｜　☾ 宿NG：宿直のみ不可")
-st.info("医師名のタブを選び、勤務できない日を設定してください。選ぶとすぐにセルの色が変わり、計算条件へ自動で反映されます。確定ボタンを押す必要はありません。")
+st.info("医師名のタブを選び、勤務できない日を設定してください。複数日を続けて選び、最後に「NG日を反映する」を押してください。選択中はプルダウンの記号で確認でき、セルの色は反映後に更新されます。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
 | 選択肢 | 意味 |
@@ -903,7 +903,7 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **現在、反映されているNG日はありません**")
 
-            with st.container(key=f"ng_calendar_{original_idx}", border=False):
+            with st.form(key=f"ng_calendar_{original_idx}", border=False):
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
 
@@ -973,6 +973,10 @@ if not valid_staff.empty:
                 
 
             
+                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を反映する", type="primary")
+            if submitted:
+                st.toast(f"{doc_name}先生のNG日を反映しました。")
+
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
                 st.button("全日NGにする", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
@@ -995,7 +999,7 @@ if not valid_staff.empty:
 st.divider()
 st.markdown("##### 📂 医師条件をCSVで保存（次回も使う場合）")
 st.write("医師名・回数・勤務間隔・希望日・反映済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
-st.caption("選択したNG日は自動で反映されています。対象年月・特別休日・増員設定・確定済みシフト・生成結果・色分けとそのメモは、このCSVには含まれません。")
+st.caption("保存前に、各医師の「NG日を反映する」を押してください。対象年月・特別休日・増員設定・確定済みシフト・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
 current_csv = staff_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
@@ -1539,7 +1543,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 # ==========================================
 st.divider()
 st.header("3. シフト案の作成・確認")
-st.info("各医師のNG日を確認したら、「シフト案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
+st.info("各医師の「NG日を反映する」を押したら、「シフト案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
 st.caption("年月や入力条件を変更しても、表示中の結果は自動更新されません。変更後は必ず再作成してください。")
 with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
     st.markdown("""
