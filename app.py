@@ -26,9 +26,34 @@ def _read_csv_any_encoding(file_bytes):
             continue
     raise ValueError("CSVのエンコーディングを判定できませんでした。")
 
+def normalize_shift_names(df):
+    """以前のCSVの枠名・上限列・希望枠を現在の名称へ変換する。"""
+    aliases = {"宿直A": "A宿直", "宿直B": "B宿直", "A当直": "A宿直", "B当直": "B宿直", "日直A": "A日直", "日直B": "B日直"}
+    for old, new in aliases.items():
+        for suffix in ("", "上限"):
+            old_col, new_col = old + suffix, new + suffix
+            if old_col not in df.columns:
+                continue
+            if new_col not in df.columns:
+                df = df.rename(columns={old_col: new_col})
+            else:
+                blank = df[new_col].fillna("").astype(str).str.strip().eq("")
+                df.loc[blank, new_col] = df.loc[blank, old_col]
+                df = df.drop(columns=[old_col])
+    request_col = "希望日(半角カンマ区切り)"
+    if request_col in df.columns:
+        def normalize_request(value):
+            if not isinstance(value, str):
+                return value
+            for old, new in aliases.items():
+                value = value.replace(old, new)
+            return value
+        df[request_col] = df[request_col].map(normalize_request)
+    return df
+
 @st.cache_data
 def parse_staff_csv(file_bytes):
-    df = _read_csv_any_encoding(file_bytes)
+    df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
     # 旧CSVの列名も受け付け、画面・出力CSVでは新名称に統一する。
     weekday_column = "翌日PM duty"
     for old_column in ("原則、宿直を外す曜日", "入れない曜日(半角カンマ区切り)", "入れない曜日"):
@@ -45,7 +70,7 @@ def parse_staff_csv(file_bytes):
 
 @st.cache_data
 def parse_fixed_csv(file_bytes):
-    df = _read_csv_any_encoding(file_bytes)
+    df = normalize_shift_names(_read_csv_any_encoding(file_bytes))
     if '区分' in df.columns:
         df = df.rename(columns={'区分': '平日/休日'})
     return df
@@ -569,8 +594,8 @@ st.info("通常は各枠1名です。増員する場合だけ行を追加し、�
 st.caption("日直の増員は休日扱いの日に設定してください。平日に日直を設ける場合は、先に上のカレンダーで「休日にする」にチェックを入れます。")
 
 _, num_days = calendar.monthrange(year, month)
-NIGHT_SHIFTS_UI = ['宿直A', '宿直B', '外来宿直']
-DAY_SHIFTS_UI = ['日直A', '日直B', '外来日直']
+NIGHT_SHIFTS_UI = ['A宿直', 'B宿直', '外来宿直']
+DAY_SHIFTS_UI = ['A日直', 'B日直', '外来日直']
 
 date_options = [f"{d}日" for d in range(1, num_days + 1)]
 shift_options = NIGHT_SHIFTS_UI + DAY_SHIFTS_UI
@@ -625,10 +650,10 @@ total_slots = sum(shift_counts.values())
 
 st.subheader(f"📌 {year}年{month}月の必要シフト枠数")
 
-st.metric("🌙 宿直A", f"{shift_counts['宿直A']} 枠")
-st.metric("☀️ 日直A", f"{shift_counts['日直A']} 枠")
-st.metric("🌙 宿直B", f"{shift_counts['宿直B']} 枠")
-st.metric("☀️ 日直B", f"{shift_counts['日直B']} 枠")
+st.metric("🌙 A宿直", f"{shift_counts['A宿直']} 枠")
+st.metric("☀️ A日直", f"{shift_counts['A日直']} 枠")
+st.metric("🌙 B宿直", f"{shift_counts['B宿直']} 枠")
+st.metric("☀️ B日直", f"{shift_counts['B日直']} 枠")
 st.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
 st.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
 st.metric("🏥 月間 総シフト数", f"{total_slots} 枠")
@@ -651,7 +676,7 @@ with st.expander("確定済みシフトの入力例と扱い", expanded=False):
 - 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務の前後は勤務間隔の制限対象から外れるため、結果をご確認ください。
     """)
 
-fixed_columns = ["日付", "平日/休日", "宿直A", "宿直B", "外来宿直", "日直A", "日直B", "外来日直"]
+fixed_columns = ["日付", "平日/休日", "A宿直", "B宿直", "外来宿直", "A日直", "B日直", "外来日直"]
 fixed_template_df = pd.DataFrame(columns=fixed_columns)
 fixed_csv_template = fixed_template_df.to_csv(index=False).encode('utf-8-sig')
 
@@ -696,8 +721,8 @@ with st.expander("入力例：曜日・希望日・備考", expanded=False):
 | 項目 | 入力方法・意味 |
 | --- | --- |
 | 翌日PM duty | `水,木` のように半角カンマで区切ります。翌日PMにdutyがある曜日を入力します（例：木曜PMにdutyがある場合は「水」）。原則としてその曜日の宿直を外しますが、翌日が休日なら宿直に入る場合があります。日直は対象外です。 |
-| 希望日 | `10,15` はその日のいずれかの枠、`10:宿直A` はその枠を希望します。複数の希望は半角カンマで区切ります。 |
-| 指定できる枠 | 宿直A・宿直B・外来宿直・日直A・日直B・外来日直。表記を一致させてください。 |
+| 希望日 | `10,15` はその日のいずれかの枠、`10:A宿直` はその枠を希望します。複数の希望は半角カンマで区切ります。 |
+| 指定できる枠 | A宿直・B宿直・外来宿直・A日直・B日直・外来日直。表記を一致させてください。 |
 | 備考 | 管理用のメモです。「学会」などと書いても計算条件には反映されません。休みはNG日で指定してください。 |
 
 曜日にかかわらず勤務できない日は、カレンダーでNGを指定します。
@@ -711,7 +736,7 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 | 月間最小回数 | できるだけ確保したい回数です。条件によっては、この回数に届かないことがあります。 |
 | 月間最大回数 | 日直と宿直を合わせた月間の上限です。 |
 | 休日最大回数 | 土日祝日・特別休日に担当する日直と宿直の合計上限です。 |
-| 各枠の上限 | 宿直Aなど、それぞれの枠を担当する月間の上限です。 |
+| 各枠の上限 | A宿直など、それぞれの枠を担当する月間の上限です。 |
 
 1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
 月間最小回数は、月間最大回数以下に設定してください。
@@ -730,17 +755,17 @@ template_data = {
     "先生の名前": ["Dr. A", "Dr. B", "Dr. C", "Dr. D", "Dr. E"],
     "翌日PM duty": ["水,木", "", "土,日", "", ""],
     "NG日(半角カンマ区切り)": ["", "15:日NG", "10:宿NG", "", ""],
-    "希望日(半角カンマ区切り)": ["10:宿直A, 15:日直B", "", "8", "20", ""], 
+    "希望日(半角カンマ区切り)": ["10:A宿直, 15:B日直", "", "8", "20", ""], 
     "希望優先度(数字が大きいほど優先)": [100, 1, 1, 1, 1], 
     "最低空ける日数": [5, 4, 6, 5, 3],  
     "月間最小回数": [1, 2, 0, 1, 0],
     "月間最大回数": [5, 6, 4, 5, 7],
     "休日最大回数": [2, 2, 2, 2, 2],    
-    "宿直A上限": [2, 2, 2, 2, 2],
-    "宿直B上限": [2, 2, 2, 2, 2],
+    "A宿直上限": [2, 2, 2, 2, 2],
+    "B宿直上限": [2, 2, 2, 2, 2],
     "外来宿直上限": [2, 2, 2, 2, 2],
-    "日直A上限": [2, 2, 2, 2, 2],
-    "日直B上限": [2, 2, 2, 2, 2],
+    "A日直上限": [2, 2, 2, 2, 2],
+    "B日直上限": [2, 2, 2, 2, 2],
     "外来日直上限": [2, 2, 2, 2, 2],
     "備考（メモ・説明など自由記入）": ["学会のため休み多め", "15日は午後休", "", "当直明け休み希望", ""]
 }
@@ -798,16 +823,16 @@ edited_df = st.data_editor(
         "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
         "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
         "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝・特別休日の日直と宿直の合計上限です。1枠を1回と数えます。"),
-        "宿直A上限": st.column_config.NumberColumn("宿直A上限", help="宿直Aを担当する月間の上限です。確定指定がある場合は例外があります。"),
-        "宿直B上限": st.column_config.NumberColumn("宿直B上限", help="宿直Bを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "A宿直上限": st.column_config.NumberColumn("A宿直上限", help="A宿直を担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "B宿直上限": st.column_config.NumberColumn("B宿直上限", help="B宿直を担当する月間の上限です。確定指定がある場合は例外があります。"),
         "外来宿直上限": st.column_config.NumberColumn("外来宿直上限", help="外来宿直を担当する月間の上限です。確定指定がある場合は例外があります。"),
-        "日直A上限": st.column_config.NumberColumn("日直A上限", help="日直Aを担当する月間の上限です。確定指定がある場合は例外があります。"),
-        "日直B上限": st.column_config.NumberColumn("日直B上限", help="日直Bを担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "A日直上限": st.column_config.NumberColumn("A日直上限", help="A日直を担当する月間の上限です。確定指定がある場合は例外があります。"),
+        "B日直上限": st.column_config.NumberColumn("B日直上限", help="B日直を担当する月間の上限です。確定指定がある場合は例外があります。"),
         "外来日直上限": st.column_config.NumberColumn("外来日直上限", help="外来日直を担当する月間の上限です。確定指定がある場合は例外があります。"),
         "NG日(半角カンマ区切り)": None, 
         "希望日(半角カンマ区切り)": st.column_config.TextColumn(
             "希望日",
-            help="例：10,15 または 10:宿直A。複数は半角カンマ区切り。通常の希望は各種条件の範囲内で割り当てます。"
+            help="例：10,15 または 10:A宿直。複数は半角カンマ区切り。通常の希望は各種条件の範囲内で割り当てます。"
         ),
         "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
             "希望優先度",
@@ -991,8 +1016,8 @@ st.divider()
 # ==========================================
 def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None):
     _, num_days = calendar.monthrange(target_year, target_month)
-    NIGHT_SHIFTS = ['宿直A', '宿直B', '外来宿直']
-    DAY_SHIFTS = ['日直A', '日直B', '外来日直']
+    NIGHT_SHIFTS = ['A宿直', 'B宿直', '外来宿直']
+    DAY_SHIFTS = ['A日直', 'B日直', '外来日直']
 
     def is_holiday(y, m, d):
         date = datetime.date(y, m, d)
@@ -1110,11 +1135,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         max_hol_shifts_per_doc[doc] = safe_int(row.get('休日最大回数'), 4)
 
         max_shifts_per_type[doc] = {
-            '宿直A': safe_int(row.get('宿直A上限'), 2),
-            '宿直B': safe_int(row.get('宿直B上限'), 2),
+            'A宿直': safe_int(row.get('A宿直上限'), 2),
+            'B宿直': safe_int(row.get('B宿直上限'), 2),
             '外来宿直': safe_int(row.get('外来宿直上限'), 2),
-            '日直A': safe_int(row.get('日直A上限'), 2),
-            '日直B': safe_int(row.get('日直B上限'), 2),
+            'A日直': safe_int(row.get('A日直上限'), 2),
+            'B日直': safe_int(row.get('B日直上限'), 2),
             '外来日直': safe_int(row.get('外来日直上限'), 2)
         }
     
@@ -1573,7 +1598,7 @@ if len(staff_df) > 0:
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
         
-        shift_columns = ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']
+        shift_columns = ['A宿直', 'B宿直', '外来宿直', 'A日直', 'B日直', '外来日直']
         doctors_list = staff_df['先生の名前'].astype(str).tolist()
         
         st.subheader("📅 作成したシフト案")
@@ -1733,8 +1758,8 @@ if len(staff_df) > 0:
                 total_count += count
                 hol_count += sum(1 for val in df_result[df_result['平日/休日'] == '休日'][s] if doc in [x.strip() for x in re.split(r'[、,]', str(val))])
                         
-            doc_data["宿直回数"] = doc_data.get("宿直A", 0) + doc_data.get("宿直B", 0) + doc_data.get("外来宿直", 0)
-            doc_data["日直回数"] = doc_data.get("日直A", 0) + doc_data.get("日直B", 0) + doc_data.get("外来日直", 0)
+            doc_data["宿直回数"] = doc_data.get("A宿直", 0) + doc_data.get("B宿直", 0) + doc_data.get("外来宿直", 0)
+            doc_data["日直回数"] = doc_data.get("A日直", 0) + doc_data.get("B日直", 0) + doc_data.get("外来日直", 0)
             doc_data["休日回数"] = hol_count
             doc_data["総合計"] = total_count
             
@@ -1763,7 +1788,7 @@ if len(staff_df) > 0:
             summary_list.append(doc_data)
             
         df_summary = pd.DataFrame(summary_list)
-        df_summary = df_summary[['先生の名前', '宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
+        df_summary = df_summary[['先生の名前', 'A宿直', 'B宿直', '外来宿直', 'A日直', 'B日直', '外来日直', '宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
         
         df_summary = df_summary.set_index('先生の名前')
         
