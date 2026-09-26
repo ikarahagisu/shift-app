@@ -6,6 +6,9 @@ import io
 import math
 import random
 import re
+import time
+import hashlib
+import itertools
 from ortools.sat.python import cp_model
 import jpholiday
 
@@ -975,7 +978,7 @@ st.divider()
 # ==========================================
 # 4. シフト計算ロジック（関数）
 # ==========================================
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None):
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, *, diagnostic_only=False, diagnostic_seconds=1.0):
     _, num_days = calendar.monthrange(target_year, target_month)
     NIGHT_SHIFTS = ['宿直A', '宿直B', '外来宿直']
     DAY_SHIFTS = ['日直A', '日直B', '外来日直']
@@ -1288,7 +1291,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 60.0
     solver.parameters.random_seed = random.randint(1, 10000)
-    status = solver.Solve(model)
+    status = cp_model.UNKNOWN if diagnostic_only else solver.Solve(model)
 
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         schedule_list = []
@@ -1328,7 +1331,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         # =========================================================
         # バックアップ（緩和モデル）
         # =========================================================
-        reasons = [] 
+        reasons = []
+        if not diagnostic_only:
+            if status == cp_model.UNKNOWN:
+                reasons.append("計算時間内に全枠を満たす案を発見できませんでした。条件が不可能と確定したわけではありません。")
+            elif status == cp_model.MODEL_INVALID:
+                return None, False, ["計算モデルにエラーがあります。条件緩和ではなく入力・プログラムの確認が必要です。"], None, None
         try:
             relax_model = cp_model.CpModel()
             r_shifts = {}
@@ -1443,7 +1451,10 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in daily_active_shifts[d]))
 
             relax_solver = cp_model.CpSolver()
-            relax_solver.parameters.max_time_in_seconds = 15.0
+            relax_solver.parameters.max_time_in_seconds = diagnostic_seconds if diagnostic_only else 15.0
+            if diagnostic_only:
+                relax_solver.parameters.random_seed = 42
+                relax_solver.parameters.num_search_workers = 1
             relax_status = relax_solver.Solve(relax_model)
 
             if relax_status == cp_model.OPTIMAL or relax_status == cp_model.FEASIBLE:
@@ -1481,6 +1492,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     partial_schedule_list.append(row_dict)
 
                 partial_df = pd.DataFrame(partial_schedule_list)
+                partial_df.attrs["missing_count"] = sum(missing_by_shift.values())
+                partial_df.attrs["missing_optimal"] = relax_status == cp_model.OPTIMAL
+                partial_df.attrs["diagnostic_status"] = relax_solver.StatusName(relax_status)
 
                 if bottlenecks:
                     reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
@@ -1496,7 +1510,127 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         except Exception as e:
             reasons.append(f"⚠️ 部分的なシフト表の作成中にもエラーが発生しました。詳細: {e}")
 
+        if not reasons:
+            reasons.append("不足を許容しても解がありません。確定指定の矛盾などを確認してください。" if relax_status == cp_model.INFEASIBLE else "時間内に診断用の案を発見できませんでした。")
         return None, False, reasons, None, None
+
+# ==========================================
+# 改善案の診断（入力値と本番の結果は変更しない）
+# ==========================================
+def diagnostic_fingerprint(year, month, staff, holidays, slots, fixed):
+    payload = repr((year, month, sorted(holidays), sorted(slots.items())))
+    payload += staff.to_csv(index=False) + fixed.to_csv(index=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def diagnose_shift(year, month, staff, holidays, slots, fixed, *, budget_seconds=60.0, progress=None):
+    """現行モデルの範囲で不足人数を比較する。最小変更の保証はしない。"""
+    report = {"rows": [], "notes": [], "tested": 0, "candidates": 0}
+    names = staff["先生の名前"].astype(str).str.strip()
+    if names.eq("").any() or names.duplicated().any():
+        report["notes"].append("医師名の空欄・重複を解消してから診断してください。")
+        return report
+    limits = [("月間最大回数", 5), ("休日最大回数", 4)]
+    limits += [(s + "上限", 2) for s in ['宿直A', '宿直B', '外来宿直', '日直A', '日直B', '外来日直']]
+    limits += [("最低空ける日数", 5)]
+    # 暗黙の丸めや既定値への置換を、診断理由と混同しない。
+    for col, default in limits:
+        values = staff[col] if col in staff else pd.Series(default, index=staff.index)
+        numeric = pd.to_numeric(values, errors="coerce")
+        invalid = values.notna() & (numeric.isna() | numeric.lt(0) | numeric.mod(1).ne(0))
+        if invalid.any():
+            report["notes"].append(f"「{col}」は0以上の整数で入力してください。")
+    if report["notes"]:
+        return report
+    started = time.monotonic()
+    deadline = started + budget_seconds
+
+    def run(frame, seconds):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.05:
+            return None, ["診断時間の上限に達しました。"]
+        result, _, reasons, _, _ = generate_shift(
+            year, month, frame, holidays, slots, fixed,
+            diagnostic_only=True, diagnostic_seconds=min(seconds, remaining))
+        return result, reasons
+
+    baseline, reasons = run(staff, 4.0)
+    if baseline is None:
+        report["notes"] = ["変更前の条件で比較用の案を作れず、改善効果を判定できませんでした。"] + reasons
+        return report
+    baseline_count = int(baseline.attrs["missing_count"])
+    proven = bool(baseline.attrs["missing_optimal"])
+    report.update(baseline=baseline_count, baseline_optimal=proven)
+    if baseline_count == 0:
+        report["notes"].append("条件を変更せずに全枠を埋める案が見つかりました。通常のシフト作成を再実行してください。")
+        return report
+    report["notes"].append(
+        f"変更前の最少不足は{baseline_count}枠です（最適性確認済み）。" if proven else
+        f"変更前に見つかった案は{baseline_count}枠不足です。最少不足数は未確定のため、差は参考比較です。")
+    # 条件の種類が偏らないよう、医師ごとに候補を交互に並べる。
+    candidates = []
+    for idx in staff.index:
+        for col, default in limits:
+            value = staff.loc[idx].get(col, default)
+            old = default if pd.isna(value) else int(float(value))
+            new = old - 1 if col == "最低空ける日数" else old + 1
+            if new < 0:
+                continue
+            candidates.append((idx, col, old, new))
+    report["candidates"] = len(candidates)
+    singles = []
+    unknown = 0
+
+    def evaluate(changes):
+        nonlocal unknown
+        frame = staff.copy(deep=True)
+        for idx, col, old, new in changes:
+            if col not in frame:
+                frame[col] = dict(limits)[col]
+            frame.at[idx, col] = new
+        result, reasons = run(frame, 0.65)
+        report["tested"] += 1
+        if progress:
+            progress(min(0.99, (time.monotonic() - started) / budget_seconds), f"改善案を確認中：{report['tested']}案")
+        if result is None:
+            unknown += 1
+            return None
+        count = int(result.attrs["missing_count"])
+        if count < baseline_count:
+            label = " ／ ".join(f"{staff.loc[i, '先生の名前']}先生：{c} {o}→{n}" for i, c, o, n in changes)
+            report["rows"].append({"_changes": set(changes), "変更案": label, "変更前の不足": baseline_count,
+                "変更後の不足": count, "判定": "全枠を埋める案を確認" if count == 0 else
+                ("不足の減少を確認" if proven else "見つかった案同士の参考比較")})
+        return count
+
+    # 一条件の比較に時間枠の約7割を使用。人数が多い場合は一部のみ。
+    single_deadline = started + budget_seconds * 0.72
+    for change in candidates:
+        if time.monotonic() >= single_deadline:
+            break
+        count = evaluate([change])
+        singles.append((count, change))
+    # 改善がない単独案も残し、二条件を合わせることで初めて改善するケースを試す。
+    ranked = sorted(singles, key=lambda item: item[0] if item[0] is not None else float("inf"))
+    pool = [change for _, change in ranked[:12]]
+    for first, second in itertools.combinations(pool, 2):
+        if time.monotonic() >= deadline - 0.1:
+            break
+        evaluate([first, second])
+    report["rows"].sort(key=lambda row: (row["変更後の不足"], row["変更案"].count(" ／ ")))
+    # 同じ効果を単独変更で得られる場合、余分な変更を含む組み合わせは表示しない。
+    report["rows"] = [row for row in report["rows"] if not any(
+        other["_changes"] < row["_changes"] and other["変更後の不足"] <= row["変更後の不足"]
+        for other in report["rows"])]
+    report["rows"] = report["rows"][:10]
+    for row in report["rows"]:
+        row.pop("_changes")
+    report["notes"].append(f"単独変更{len(singles)}/{len(candidates)}案、組み合わせ{report['tested']-len(singles)}案を確認しました。時間内に判定できない案は{unknown}案です。")
+    if not report["rows"]:
+        report["notes"].append("今回の探索範囲では改善案を確認できませんでした。より大きな変更や3条件以上の組み合わせは未検証です。")
+    report["notes"].append("NG日・曜日指定・確定勤務・必要人数は変更していません。月またぎを含む勤務間隔の扱いは現行コードのままです。提案は現行モデルでの確認結果であり、入力への自動適用は行いません。")
+    return report
+
 
 # ==========================================
 # 5. 実行ボタンと結果表示
@@ -1519,12 +1653,16 @@ staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
 fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
 
+current_diagnostic_key = diagnostic_fingerprint(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
 if len(staff_df) > 0:
     if st.button("🚀 この条件でシフト案を作成する", type="primary"):
         with st.spinner("シフト案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
+                st.session_state.pop("diagnostic_report", None)
+                st.session_state["diagnostic_failed_key"] = None
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
                 
+                st.session_state["diagnostic_failed_key"] = None if success else current_diagnostic_key
                 if success:
                     st.session_state['generated_df'] = df_result
                     st.session_state['past_worked_dates'] = past_worked_dates
@@ -1553,6 +1691,30 @@ if len(staff_df) > 0:
                             st.write(reason)
             except Exception as e:
                 st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
+
+    if st.session_state.get("diagnostic_failed_key") == current_diagnostic_key:
+        st.subheader("🔎 どの条件を調整すると改善するか")
+        st.caption("上限を1回増やす・勤務間隔を1日短くする案と、一部の2条件の組み合わせを再計算します。目安は約60秒＋処理時間です。入力値と表示中のシフト案は変更しません。")
+        if st.button("🔎 改善案を調べる", key="run_diagnostics"):
+            diagnostic_progress = st.progress(0.0, text="変更前の条件を確認中…")
+            try:
+                report = diagnose_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df,
+                    progress=lambda fraction, message: diagnostic_progress.progress(fraction, text=message))
+                st.session_state["diagnostic_report"] = (current_diagnostic_key, report)
+            except Exception as exc:
+                st.error(f"診断中にエラーが発生しました。条件緩和の必要性は判定できません。詳細：{exc}")
+            finally:
+                diagnostic_progress.empty()
+        saved_diagnosis = st.session_state.get("diagnostic_report")
+        if saved_diagnosis and saved_diagnosis[0] == current_diagnostic_key:
+            report = saved_diagnosis[1]
+            if report["rows"]:
+                st.dataframe(pd.DataFrame(report["rows"]), hide_index=True, use_container_width=True)
+                st.info("採用する変更案を医師条件の表へ入力し、NG日の反映を確認して、シフト案を再作成してください。必要な勤務間隔や担当可能回数の範囲内で調整してください。")
+            for note in report["notes"]:
+                st.write(note)
+    elif st.session_state.get("diagnostic_failed_key"):
+        st.caption("入力条件が変更されています。新しい条件でシフト案を作成すると、その条件で診断できます。")
 
     if 'generated_df' in st.session_state:
         df_result = st.session_state['generated_df']
