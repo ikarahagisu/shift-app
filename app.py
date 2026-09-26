@@ -843,7 +843,6 @@ st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.caption("セルの上段は日直、下段は宿直です。NGの側だけ色が付きます。「可」はその勤務帯にNG指定がない意味で、曜日・回数など他の条件は適用されます。")
-st.markdown("**⚠ マークの説明：** 原則、宿直を外す曜日です。ただし、翌日が休日の場合は宿直に入ることがあります。日直は対象外です。")
 st.info("医師名のタブを選び、勤務できない日を設定してください。複数日を続けて選び、最後に「NG日を反映する」を押してください。どちらの表示でも、選択するとその場で色が変わります。NGを選ぶだけでは画面全体を再読み込みしません。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
@@ -940,6 +939,7 @@ if not valid_staff.empty:
                     "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday")})
             revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
             component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
+            st.caption("⚠ 翌日午後（PM）にdutyがあるため、原則として宿直を外す曜日です。ただし、翌日が休日の場合は宿直に入ることがあります。日直は対象外です。")
             response = horizontal_ng_component(HORIZONTAL_NG_HTML)(days=component_days, mode="row" if ng_horizontal else "month", offset=datetime.date(year, month, 1).weekday(), doctor=doc_name, version=revision, key=component_key, default=None)
             seen_key = component_key + "_last_token"
             if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
