@@ -847,6 +847,31 @@ with st.expander("NGの種類・一括操作について", expanded=False):
 次回も使う場合は、下の「医師条件をCSVで保存」をご利用ください。
     """)
 
+ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="ng_calendar_layout")
+ng_horizontal = ng_layout == "1日〜月末を横一列"
+st.caption("表示を切り替える前に、選択中のNG日を反映してください。反映済みの内容は、どちらの表示でも共通です。")
+if ng_horizontal:
+    st.caption("カレンダー下の横スクロールバー、またはタッチ操作で左右へ移動できます。各日の上段に日付と曜日を表示します。")
+    st.markdown(f"""
+    <style>
+    div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"]:has(> div:is([data-testid="column"], [data-testid="stColumn"]):nth-child(7)) {{
+        display: grid !important;
+        grid-template-columns: repeat({num_days}, 104px) !important;
+        gap: 6px !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding-bottom: 14px !important;
+        scrollbar-width: auto;
+    }}
+    div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"]:has(> div:is([data-testid="column"], [data-testid="stColumn"]):nth-child(7)) > div {{
+        width: 104px !important; min-width: 104px !important;
+        max-width: 104px !important;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
+
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
@@ -907,19 +932,21 @@ if not valid_staff.empty:
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
 
-                cols = st.columns(7)
-                for i, w in enumerate(weekdays_ja):
-                    color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                    cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
-                
-                for week in cal_matrix:
+                if not ng_horizontal:
                     cols = st.columns(7)
+                    for i, w in enumerate(weekdays_ja):
+                        color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                        cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
+
+                ng_weeks = [list(range(1, num_days + 1))] if ng_horizontal else cal_matrix
+                for week in ng_weeks:
+                    cols = st.columns(len(week))
                     for i, day in enumerate(week):
                         if day != 0:
                             date_obj = datetime.date(year, month, day)
                             is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
                             is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            is_hard = i in hard_days
+                            is_hard = date_obj.weekday() in hard_days
                             
                             warning_mark = "⚠️" if is_hard else ""
                             
@@ -957,10 +984,11 @@ if not valid_staff.empty:
                                 }
                                 bg_color, label_color, status_label = ng_colors[current_ng]
                                 date_color = label_color if current_ng != "OK" else text_color
+                                day_label = f"{day}日（{weekdays_ja[date_obj.weekday()]}）" if ng_horizontal else f"{day}日"
                                 day_html = (
                                     f"<div data-ng-state='{current_ng}' style='background:{bg_color};"
                                     f"color:{label_color};text-align:center;border-radius:6px;padding:6px 1px;'>"
-                                    f"<div style='color:{date_color};font-weight:800;font-size:1rem;'>{day}日 {warning_mark}</div>"
+                                    f"<div style='color:{date_color};font-weight:800;font-size:1rem;'>{day_label} {warning_mark}</div>"
                                     f"<div style='font-weight:800;font-size:0.8rem;'>{status_label}</div></div>"
                                 )
                                 st.markdown(day_html, unsafe_allow_html=True)
