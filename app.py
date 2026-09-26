@@ -231,7 +231,7 @@ with st.expander("初めて使う方へ：入力からダウンロードまで",
 1. **年月・休日・必要人数を設定**します。
 2. 必要に応じて、**先月末の勤務や今月の確定済みシフト**を入力します。
 3. **医師ごとの回数・勤務間隔・希望日**を入力します。
-4. 各医師のカレンダーで**NG日を選び、「NG日を反映する」**を押します。
+4. 各医師のカレンダーで**NG日を選びます（選択すると自動で反映されます）。**
 5. **「シフト案を作成する」**を押し、結果を確認してCSVをダウンロードします。
 
 途中で終了する場合は、下の「医師条件をCSVで保存」をご利用ください。
@@ -404,6 +404,37 @@ div[data-testid="stCheckbox"] label {
     gap: 6px !important;
     width: 100% !important;
 }
+
+
+/* 医師別NGカレンダー：選択内容をセル全体で強調 */
+div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] {
+    display: grid !important;
+    grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+}
+div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div {
+    width: auto !important; min-width: 0 !important;
+    padding: 4px !important; border: 2px solid #E5E7EB;
+    border-radius: 8px; background: #FFFFFF; box-sizing: border-box;
+}
+div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="全NG"]) {
+    background: #FDE8EC; border-color: #B42332;
+    box-shadow: inset 0 0 0 1px #B42332;
+}
+div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="日NG"]) {
+    background: #FFF0D9; border-color: #9A4700;
+    box-shadow: inset 0 0 0 1px #9A4700;
+}
+div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="宿NG"]) {
+    background: #E3EFFF; border-color: #1856A4;
+    box-shadow: inset 0 0 0 1px #1856A4;
+}
+div[class*="st-key-ng_calendar_"] [data-baseweb="select"] > div {
+    min-height: 1.9rem !important; padding: 0 2px !important;
+    font-size: 0.75rem !important; font-weight: 700 !important;
+}
+div[class*="st-key-ng_calendar_"] [data-baseweb="select"] { min-width: 0 !important; }
+div[class*="st-key-ng_calendar_"] [data-testid="stVerticalBlock"] { gap: 5px !important; }
 
 </style>
 """, unsafe_allow_html=True)
@@ -797,7 +828,8 @@ if "月間最大回数" in staff_df.columns:
 st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
-st.info("医師名のタブを選び、勤務できない日を設定してください。選び終わったら、その医師の「NG日を反映する」を押してから、別の操作へ進んでください。")
+st.caption("✕ 全NG：日直・宿直とも不可　｜　☀ 日NG：日直のみ不可　｜　☾ 宿NG：宿直のみ不可")
+st.info("医師名のタブを選び、勤務できない日を設定してください。選ぶとすぐにセルの色が変わり、計算条件へ自動で反映されます。確定ボタンを押す必要はありません。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
 | 選択肢 | 意味 |
@@ -871,7 +903,7 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **現在、反映されているNG日はありません**")
 
-            with st.form(key=f"ng_form_{original_idx}", border=False):
+            with st.container(key=f"ng_calendar_{original_idx}", border=False):
                 if hard_days:
                     st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
 
@@ -917,24 +949,29 @@ if not valid_staff.empty:
                                 else:
                                     text_color = "inherit"
 
-                                if current_ng == "全NG":
-                                    bg_color = "#ffe6e6"
-                                elif current_ng == "日NG":
-                                    bg_color = "#fff0e6"
-                                elif current_ng == "宿NG":
-                                    bg_color = "#e6f2ff"
-                                else:
-                                    bg_color = "transparent"
-
-                                day_html = f"<div style='background-color: {bg_color}; color: {text_color}; font-weight: bold; font-size: 0.85rem; margin-bottom: 2px; padding: 2px; border-radius: 4px;'>{day}日 {warning_mark}</div>"
-                                
+                                ng_colors = {
+                                    "全NG": ("#B42332", "#FFFFFF", "✕ 全NG"),
+                                    "日NG": ("#9A4700", "#FFFFFF", "☀ 日NG"),
+                                    "宿NG": ("#1856A4", "#FFFFFF", "☾ 宿NG"),
+                                    "OK": ("#F3F4F6", "#4B5563", "OK"),
+                                }
+                                bg_color, label_color, status_label = ng_colors[current_ng]
+                                date_color = label_color if current_ng != "OK" else text_color
+                                day_html = (
+                                    f"<div data-ng-state='{current_ng}' style='background:{bg_color};"
+                                    f"color:{label_color};text-align:center;border-radius:6px;padding:6px 1px;'>"
+                                    f"<div style='color:{date_color};font-weight:800;font-size:1rem;'>{day}日 {warning_mark}</div>"
+                                    f"<div style='font-weight:800;font-size:0.8rem;'>{status_label}</div></div>"
+                                )
                                 st.markdown(day_html, unsafe_allow_html=True)
-                                st.selectbox(f"{day}日のNG設定", options=opts, index=idx, key=chk_key, label_visibility="collapsed")
+                                st.selectbox(f"{day}日のNG設定", options=opts, key=chk_key,
+                                    format_func=lambda value: {"OK": "OK", "全NG": "✕ 全NG", "日NG": "☀ 日NG", "宿NG": "☾ 宿NG"}[value],
+                                    label_visibility="collapsed")
                         else:
                             with cols[i]:
                                 st.write("")
                 
-                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を反映する", type="primary")
+
             
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
@@ -953,13 +990,12 @@ if not valid_staff.empty:
                     
             staff_df.at[original_idx, "NG日(半角カンマ区切り)"] = ",".join(ng_items)
             
-            if submitted:
-                st.toast(f"✅ {doc_name}先生のNG日を計算条件に反映しました。")
+
 
 st.divider()
 st.markdown("##### 📂 医師条件をCSVで保存（次回も使う場合）")
 st.write("医師名・回数・勤務間隔・希望日・反映済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
-st.caption("保存前に、各医師のNG日を反映してください。対象年月・特別休日・増員設定・確定済みシフト・生成結果・色分けとそのメモは、このCSVには含まれません。")
+st.caption("選択したNG日は自動で反映されています。対象年月・特別休日・増員設定・確定済みシフト・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
 current_csv = staff_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
@@ -1503,7 +1539,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 # ==========================================
 st.divider()
 st.header("3. シフト案の作成・確認")
-st.info("各医師のNG日を反映したら、「シフト案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
+st.info("各医師のNG日を確認したら、「シフト案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
 st.caption("年月や入力条件を変更しても、表示中の結果は自動更新されません。変更後は必ず再作成してください。")
 with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
     st.markdown("""
