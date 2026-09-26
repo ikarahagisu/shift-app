@@ -222,6 +222,18 @@ def add_interval_constraints(
             model.AddNoOverlap(intervals_for_doc)
 
 
+# 横一列表示は独立したHTMLコンポーネントで描画し、列の自動縮小を防ぐ。
+@st.cache_resource
+def horizontal_ng_component():
+    import tempfile
+    from pathlib import Path
+    import streamlit.components.v1 as components
+    directory = Path(tempfile.mkdtemp(prefix="shift_ng_calendar_"))
+    (directory / "index.html").write_text(HORIZONTAL_NG_HTML, encoding="utf-8")
+    return components.declare_component("shift_horizontal_ng", path=str(directory))
+
+HORIZONTAL_NG_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.cell[data-state="全NG"]{border-color:#b42332;background:#fde8ec}.cell[data-state="全NG"] .head{background:#b42332;color:white}.cell[data-state="日NG"]{border-color:#9a4700;background:#fff0d9}.cell[data-state="日NG"] .head{background:#9a4700;color:white}.cell[data-state="宿NG"]{border-color:#1856a4;background:#e3efff}.cell[data-state="宿NG"] .head{background:#1856a4;color:white}.cell[data-state="OK"] .day.holiday{color:#c92336}.cell[data-state="OK"] .day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}\n</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を反映する</button><script>\nlet version=null,days=[],draft=[],seen=null;const labels={OK:\'OK\',\'全NG\':\'✕ 全NG\',\'日NG\':\'☀ 日NG\',\'宿NG\':\'☾ 宿NG\'};\nfunction send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},\'*\')}\nfunction paint(cell,value){cell.dataset.state=value;cell.querySelector(\'.state\').textContent=labels[value]}\nwindow.addEventListener(\'message\',(event)=>{if(event.data.type!==\'streamlit:render\')return;let a=event.data.args;document.getElementById(\'apply\').textContent=a.doctor+\'先生のNG日を反映する\';if(a.version!==version){version=a.version;days=a.days;draft=days.map(d=>d.value);let strip=document.getElementById(\'strip\');strip.replaceChildren();days.forEach((d,i)=>{let cell=document.createElement(\'div\');cell.className=\'cell\';let head=document.createElement(\'div\');head.className=\'head\';let day=document.createElement(\'div\');day.className=\'day \'+d.kind;day.textContent=d.day+\'日（\'+d.weekday+\'）\';let state=document.createElement(\'div\');state.className=\'state\';head.append(day,state);if(d.warning){let warning=document.createElement(\'span\');warning.textContent=\'⚠ 曜日指定\';warning.style.fontSize=\'11px\';head.append(warning)}let sel=document.createElement(\'select\');sel.setAttribute(\'aria-label\',d.day+\'日のNG設定\');d.options.forEach(v=>{let o=document.createElement(\'option\');o.value=v;o.textContent=labels[v];sel.append(o)});sel.value=d.value;sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById(\'note\').textContent=\'未反映の変更があります。選び終わったら下のボタンを押してください。\'};cell.append(head,sel);paint(cell,d.value);strip.append(cell)});document.getElementById(\'note\').textContent=\'左右へスクロールして選択できます。\';}send(\'streamlit:setFrameHeight\',{height:250})});\ndocument.getElementById(\'apply\').onclick=()=>{send(\'streamlit:setComponentValue\',{value:{version,values:draft,token:Date.now().toString()+\'-\'+Math.random()},dataType:\'json\'});document.getElementById(\'note\').textContent=\'反映しています…\';};send(\'streamlit:componentReady\',{apiVersion:1});send(\'streamlit:setFrameHeight\',{height:250});\n</script></body></html>'
+
 # ページ設定
 st.set_page_config(page_title="シフト作成アプリ", layout="wide")
 st.title("当直・日直 自動シフト作成アプリ")
@@ -261,7 +273,7 @@ st.markdown("""
    ========================================================= */
 
 /* 7列のブロックを画面幅の中に必ず収める */
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
@@ -280,7 +292,7 @@ div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7
    カレンダー各セル
    ========================================================= */
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 > div[data-testid="column"] {
     flex: none !important;
@@ -304,7 +316,7 @@ div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7
    Streamlit特有の余白を削除
    ========================================================= */
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 .element-container {
     margin: 0 !important;
@@ -320,16 +332,16 @@ div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7
    日付・曜日などの文字
    ========================================================= */
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) p,
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) label,
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 div[data-testid="stMarkdownContainer"],
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) span,
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7)) b {
     font-size: 0.8rem !important;
     text-align: center;
@@ -343,7 +355,7 @@ div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7
    Selectbox
    ========================================================= */
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 div[data-testid="stSelectbox"] {
     width: 100% !important;
@@ -352,7 +364,7 @@ div[data-testid="stSelectbox"] {
     box-sizing: border-box !important;
 }
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 div[data-baseweb="select"] {
     width: 100% !important;
@@ -362,7 +374,7 @@ div[data-baseweb="select"] {
     box-sizing: border-box !important;
 }
 
-div[data-testid="stForm"]
+div[data-testid="stForm"]:not(:has([data-ng-layout="row"]))
 div[data-testid="stHorizontalBlock"]:has(> div[data-testid="column"]:nth-child(7))
 div[data-baseweb="select"] > div {
     width: 100% !important;
@@ -407,34 +419,34 @@ div[data-testid="stCheckbox"] label {
 
 
 /* 医師別NGカレンダー：選択内容をセル全体で強調 */
-div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] {
+div[data-testid="stForm"]:has([data-ng-state]) div[data-testid="stHorizontalBlock"] {
     display: grid !important;
     grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
     gap: 4px !important;
 }
-div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div {
+div[data-testid="stForm"]:has([data-ng-state]) div[data-testid="stHorizontalBlock"] > div {
     width: auto !important; min-width: 0 !important;
     padding: 4px !important; border: 2px solid #E5E7EB !important;
     border-radius: 8px; background: #FFFFFF; box-sizing: border-box;
 }
-div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="全NG"]) {
+div[data-testid="stForm"]:has([data-ng-state]) div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="全NG"]) {
     background: #FDE8EC; border-color: #B42332 !important;
     box-shadow: inset 0 0 0 1px #B42332;
 }
-div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="日NG"]) {
+div[data-testid="stForm"]:has([data-ng-state]) div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="日NG"]) {
     background: #FFF0D9; border-color: #9A4700 !important;
     box-shadow: inset 0 0 0 1px #9A4700;
 }
-div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="宿NG"]) {
+div[data-testid="stForm"]:has([data-ng-state]) div[data-testid="stHorizontalBlock"] > div:has([data-ng-state="宿NG"]) {
     background: #E3EFFF; border-color: #1856A4 !important;
     box-shadow: inset 0 0 0 1px #1856A4;
 }
-div[class*="st-key-ng_calendar_"] [data-baseweb="select"] > div {
+div[data-testid="stForm"]:has([data-ng-state]) [data-baseweb="select"] > div {
     min-height: 1.9rem !important; padding: 0 2px !important;
     font-size: 0.75rem !important; font-weight: 700 !important;
 }
-div[class*="st-key-ng_calendar_"] [data-baseweb="select"] { min-width: 0 !important; }
-div[class*="st-key-ng_calendar_"] [data-testid="stVerticalBlock"] { gap: 5px !important; }
+div[data-testid="stForm"]:has([data-ng-state]) [data-baseweb="select"] { min-width: 0 !important; }
+div[data-testid="stForm"]:has([data-ng-state]) [data-testid="stVerticalBlock"] { gap: 5px !important; }
 
 </style>
 """, unsafe_allow_html=True)
@@ -829,7 +841,7 @@ st.divider()
 
 st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.caption("✕ 全NG：日直・宿直とも不可　｜　☀ 日NG：日直のみ不可　｜　☾ 宿NG：宿直のみ不可")
-st.info("医師名のタブを選び、勤務できない日を設定してください。複数日を続けて選び、最後に「NG日を反映する」を押してください。選択中はプルダウンの記号で確認でき、セルの色は反映後に更新されます。")
+st.info("医師名のタブを選び、勤務できない日を設定してください。複数日を続けて選び、最後に「NG日を反映する」を押してください。選択中はプルダウンの記号で確認でき、月間表示のセルの色は反映後、横一列表示の色は選択時に更新されます。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
 | 選択肢 | 意味 |
@@ -851,26 +863,7 @@ ng_layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1�
 ng_horizontal = ng_layout == "1日〜月末を横一列"
 st.caption("表示を切り替える前に、選択中のNG日を反映してください。反映済みの内容は、どちらの表示でも共通です。")
 if ng_horizontal:
-    st.caption("カレンダー下の横スクロールバー、またはタッチ操作で左右へ移動できます。各日の上段に日付と曜日を表示します。")
-    st.markdown(f"""
-    <style>
-    div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"]:has(> div:is([data-testid="column"], [data-testid="stColumn"]):nth-child(7)) {{
-        display: grid !important;
-        grid-template-columns: repeat({num_days}, 104px) !important;
-        gap: 6px !important;
-        overflow-x: auto !important;
-        overflow-y: hidden !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        padding-bottom: 14px !important;
-        scrollbar-width: auto;
-    }}
-    div[class*="st-key-ng_calendar_"] div[data-testid="stHorizontalBlock"]:has(> div:is([data-testid="column"], [data-testid="stColumn"]):nth-child(7)) > div {{
-        width: 104px !important; min-width: 104px !important;
-        max-width: 104px !important;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
+    st.caption("左右へスクロールして日付を選べます。選択中の色はすぐに変わります。最後に「NG日を反映する」を押してください。")
 
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
@@ -913,8 +906,7 @@ if not valid_staff.empty:
             
             for d in range(1, num_days + 1):
                 chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
-                if chk_key not in st.session_state:
-                    st.session_state[chk_key] = current_ng_dict.get(d, "OK")
+                st.session_state[chk_key] = st.session_state.get(chk_key, current_ng_dict.get(d, "OK"))
 
             saved_strs = []
             for d in range(1, num_days + 1):
@@ -928,82 +920,112 @@ if not valid_staff.empty:
             else:
                 st.info("💡 **現在、反映されているNG日はありません**")
 
-            with st.form(key=f"ng_calendar_{original_idx}", border=False):
-                if hard_days:
-                    st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
+            if ng_horizontal:
+                import hashlib
+                import json
+                component_days = []
+                for d in range(1, num_days + 1):
+                    dt = datetime.date(year, month, d)
+                    hol = dt.weekday() >= 5 or jpholiday.is_holiday(dt) or d in custom_holidays
+                    options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
+                    k = f"ng_{doc_name}_{year}_{month}_{d}"
+                    value = st.session_state.get(k, "OK")
+                    if value not in options:
+                        value = "宿NG" if value == "全NG" else "OK"
+                    st.session_state[k] = value
+                    component_days.append({"day": d, "weekday": weekdays_ja[dt.weekday()],
+                        "options": options, "value": value, "warning": dt.weekday() in hard_days,
+                        "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday")})
+                revision = hashlib.sha256(json.dumps([year, month, doc_name, component_days], ensure_ascii=False).encode()).hexdigest()
+                component_key = f"horizontal_editor_{doc_name}_{year}_{month}"
+                response = horizontal_ng_component()(days=component_days, doctor=doc_name, version=revision, key=component_key, default=None)
+                seen_key = component_key + "_last_token"
+                if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
+                    st.session_state[seen_key] = response.get("token")
+                    values = response.get("values")
+                    if response.get("version") == revision and isinstance(values, list) and len(values) == num_days:
+                        if all(v in item["options"] for v, item in zip(values, component_days)):
+                            for d, value in enumerate(values, 1):
+                                st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = value
+                            st.rerun()
+            else:
+                with st.form(key=f"ng_calendar_{original_idx}", border=False):
+                    st.markdown(f"<span data-ng-layout={'row' if ng_horizontal else 'month'}></span>", unsafe_allow_html=True)
+                    if hard_days:
+                        st.markdown("<span style='color: #d97706; font-size: 0.9rem; font-weight: bold;'>⚠️ は「原則、宿直を外す曜日」です。翌日が休日なら宿直に入る場合があり、日直は対象外です。勤務できない日はNGを指定してください。</span>", unsafe_allow_html=True)
 
-                if not ng_horizontal:
-                    cols = st.columns(7)
-                    for i, w in enumerate(weekdays_ja):
-                        color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
-                        cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
+                    if not ng_horizontal:
+                        cols = st.columns(7)
+                        for i, w in enumerate(weekdays_ja):
+                            color = "#ff4b4b" if i == 6 else ("#1e90ff" if i == 5 else "inherit")
+                            cols[i].markdown(f"<div style='color: {color}; font-weight: bold; text-align: center; padding: 4px;'>{w}</div>", unsafe_allow_html=True)
 
-                ng_weeks = [list(range(1, num_days + 1))] if ng_horizontal else cal_matrix
-                for week in ng_weeks:
-                    cols = st.columns(len(week))
-                    for i, day in enumerate(week):
-                        if day != 0:
-                            date_obj = datetime.date(year, month, day)
-                            is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
-                            is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
-                            is_hard = date_obj.weekday() in hard_days
+                    ng_weeks = [list(range(1, num_days + 1))] if ng_horizontal else cal_matrix
+                    for week in ng_weeks:
+                        cols = st.columns(len(week))
+                        for i, day in enumerate(week):
+                            if day != 0:
+                                date_obj = datetime.date(year, month, day)
+                                is_hol_or_sun = jpholiday.is_holiday(date_obj) or date_obj.weekday() == 6 or (day in custom_holidays)
+                                is_sat = date_obj.weekday() == 5 and not is_hol_or_sun
+                                is_hard = date_obj.weekday() in hard_days
                             
-                            warning_mark = "⚠️" if is_hard else ""
+                                warning_mark = "⚠️" if is_hard else ""
                             
-                            with cols[i]:
-                                chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
+                                with cols[i]:
+                                    chk_key = f"ng_{doc_name}_{year}_{month}_{day}"
                                 
-                                is_holiday_for_ng = is_hol_or_sun or is_sat
-                                if is_holiday_for_ng:
-                                    opts = ["OK", "全NG", "日NG", "宿NG"]
-                                else:
-                                    opts = ["OK", "宿NG"]
-                                
-                                current_val = st.session_state.get(chk_key, "OK")
-                                if current_val not in opts:
-                                    if current_val in ("全NG", "宿NG"):
-                                        st.session_state[chk_key] = "宿NG"
+                                    is_holiday_for_ng = is_hol_or_sun or is_sat
+                                    if is_holiday_for_ng:
+                                        opts = ["OK", "全NG", "日NG", "宿NG"]
                                     else:
-                                        st.session_state[chk_key] = "OK"
-
-                                idx = opts.index(st.session_state[chk_key])
-                                current_ng = st.session_state[chk_key]
+                                        opts = ["OK", "宿NG"]
                                 
-                                if is_hol_or_sun:
-                                    text_color = "#ff4b4b"
-                                elif is_sat:
-                                    text_color = "#1e90ff"
-                                else:
-                                    text_color = "inherit"
+                                    current_val = st.session_state.get(chk_key, "OK")
+                                    if current_val not in opts:
+                                        if current_val in ("全NG", "宿NG"):
+                                            st.session_state[chk_key] = "宿NG"
+                                        else:
+                                            st.session_state[chk_key] = "OK"
 
-                                ng_colors = {
-                                    "全NG": ("#B42332", "#FFFFFF", "✕ 全NG"),
-                                    "日NG": ("#9A4700", "#FFFFFF", "☀ 日NG"),
-                                    "宿NG": ("#1856A4", "#FFFFFF", "☾ 宿NG"),
-                                    "OK": ("#F3F4F6", "#4B5563", "OK"),
-                                }
-                                bg_color, label_color, status_label = ng_colors[current_ng]
-                                date_color = label_color if current_ng != "OK" else text_color
-                                day_label = f"{day}日（{weekdays_ja[date_obj.weekday()]}）" if ng_horizontal else f"{day}日"
-                                day_html = (
-                                    f"<div data-ng-state='{current_ng}' style='background:{bg_color};"
-                                    f"color:{label_color};text-align:center;border-radius:6px;padding:6px 1px;'>"
-                                    f"<div style='color:{date_color};font-weight:800;font-size:1rem;'>{day_label} {warning_mark}</div>"
-                                    f"<div style='font-weight:800;font-size:0.8rem;'>{status_label}</div></div>"
-                                )
-                                st.markdown(day_html, unsafe_allow_html=True)
-                                st.selectbox(f"{day}日のNG設定", options=opts, key=chk_key,
-                                    format_func=lambda value: {"OK": "OK", "全NG": "✕ 全NG", "日NG": "☀ 日NG", "宿NG": "☾ 宿NG"}[value],
-                                    label_visibility="collapsed")
-                        else:
-                            with cols[i]:
-                                st.write("")
+                                    idx = opts.index(st.session_state[chk_key])
+                                    current_ng = st.session_state[chk_key]
+                                
+                                    if is_hol_or_sun:
+                                        text_color = "#ff4b4b"
+                                    elif is_sat:
+                                        text_color = "#1e90ff"
+                                    else:
+                                        text_color = "inherit"
+
+                                    ng_colors = {
+                                        "全NG": ("#B42332", "#FFFFFF", "✕ 全NG"),
+                                        "日NG": ("#9A4700", "#FFFFFF", "☀ 日NG"),
+                                        "宿NG": ("#1856A4", "#FFFFFF", "☾ 宿NG"),
+                                        "OK": ("#F3F4F6", "#4B5563", "OK"),
+                                    }
+                                    bg_color, label_color, status_label = ng_colors[current_ng]
+                                    date_color = label_color if current_ng != "OK" else text_color
+                                    day_label = f"{day}日（{weekdays_ja[date_obj.weekday()]}）" if ng_horizontal else f"{day}日"
+                                    day_html = (
+                                        f"<div data-ng-state='{current_ng}' style='background:{bg_color};"
+                                        f"color:{label_color};text-align:center;border-radius:6px;padding:6px 1px;'>"
+                                        f"<div style='color:{date_color};font-weight:800;font-size:1rem;'>{day_label} {warning_mark}</div>"
+                                        f"<div style='font-weight:800;font-size:0.8rem;'>{status_label}</div></div>"
+                                    )
+                                    st.markdown(day_html, unsafe_allow_html=True)
+                                    st.selectbox(f"{day}日のNG設定", options=opts, key=chk_key,
+                                        format_func=lambda value: {"OK": "OK", "全NG": "✕ 全NG", "日NG": "☀ 日NG", "宿NG": "☾ 宿NG"}[value],
+                                        label_visibility="collapsed")
+                            else:
+                                with cols[i]:
+                                    st.write("")
                 
 
             
-                submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を反映する", type="primary")
-            if submitted:
-                st.toast(f"{doc_name}先生のNG日を反映しました。")
+                    submitted = st.form_submit_button(f"✨ {doc_name}先生のNG日を反映する", type="primary")
+                if submitted:
+                    st.toast(f"{doc_name}先生のNG日を反映しました。")
 
             _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
             with col_btn1:
