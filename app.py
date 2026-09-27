@@ -1480,7 +1480,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 absolute_req_specific=absolute_req_specific,
             )
 
-            relax_model.Minimize(sum(dummies[(d, s)] for d in range(1, num_days + 1) for s in daily_active_shifts[d]))
+            # 宿直の不足人数を最優先で最小化し、その次に日直の不足を減らす。
+            # 各不足変数の上限は10。日直不足の最大値+1を宿直の重みにする。
+            night_missing = [v for (d, s), v in dummies.items() if s in NIGHT_SHIFTS]
+            day_missing = [v for (d, s), v in dummies.items() if s in DAY_SHIFTS]
+            night_priority_weight = 10 * len(day_missing) + 1
+            relax_model.Minimize(
+                night_priority_weight * sum(night_missing) + sum(day_missing)
+            )
 
             relax_solver = cp_model.CpSolver()
             relax_solver.parameters.max_time_in_seconds = 15.0
@@ -1523,6 +1530,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 partial_df = pd.DataFrame(partial_schedule_list)
 
                 if bottlenecks:
+                    reasons.append("宿直（A宿直・B宿直・外来宿直）の不足を最優先で減らし、その次に日直を埋める方針で作成しました。条件によっては宿直にも不足が残ります。")
+                    if relax_status == cp_model.FEASIBLE:
+                        reasons.append("計算時間内に得られた案です。宿直の不足が最小であることまでは確認できていません。")
                     reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
                     reasons.extend(bottlenecks)
                     reasons.append("")
