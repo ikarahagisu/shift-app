@@ -436,11 +436,9 @@ def show_schedule_notice(result, messages):
         total = sum(r['不足人数'] for r in shortage_rows)
         st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{total}名分")
         st.caption("条件を見直して再作成するか、当直案のCSVをダウンロードして不足枠を調整してください。")
-        with st.expander("不足している日付・枠を確認", expanded=False):
-            st.dataframe(pd.DataFrame(shortage_rows), hide_index=True, use_container_width=True)
     else:
         st.success("必要人数を満たす当直案ができました。")
-    # 不足の見出し・日別列挙・合計は上の表に集約。計算状態や例外の説明は残す。
+    # 不足は件数の要約と当直案で示し、重複した列挙を省く。計算状態や例外は残す。
     details = []
     for message in messages:
         if message.startswith(('🚨 **以下の枠', '📊 **【不足している枠')):
@@ -450,8 +448,7 @@ def show_schedule_notice(result, messages):
         details.append(message)
     if details:
         st.caption(f"計算状況・条件の注意事項：{len(details)}件あります。")
-        with st.expander("計算状況・条件の注意事項を確認", expanded=False):
-            st.dataframe(pd.DataFrame({"確認する内容": details}), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame({"確認する内容": details}), hide_index=True, use_container_width=True)
 
 
 # ページ設定
@@ -1794,9 +1791,21 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 # 5. 実行ボタンと結果表示
 # ==========================================
 st.divider()
+st.markdown("""
+<style>
+.st-key-create_duty_action button {
+    width: 100%;
+    min-height: 60px;
+}
+.st-key-create_duty_action button p {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+</style>
+""", unsafe_allow_html=True)
+create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
 st.info("各医師の「NG日を保存する」を押したら、「当直案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
-st.caption("年月や入力条件を変更すると、前回の結果表示・ダウンロードを停止します。変更後は再作成してください。")
 with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
     st.markdown("""
 - 表に「⚠️不足」と表示された枠は、必要人数を満たしていません。
@@ -1821,7 +1830,9 @@ if st.session_state.get('result_needs_refresh'):
     st.warning("条件が変更されています。再作成してください。前回の結果表示とダウンロードを停止しました。")
 
 if len(staff_df) > 0:
-    if st.button("🚀 この条件で当直案を作成する", type="primary"):
+    with create_button_container:
+        create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
+    if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
                 df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
