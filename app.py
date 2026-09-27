@@ -1480,13 +1480,22 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 absolute_req_specific=absolute_req_specific,
             )
 
-            # 宿直の不足人数を最優先で最小化し、その次に日直の不足を減らす。
-            # 各不足変数の上限は10。日直不足の最大値+1を宿直の重みにする。
-            night_missing = [v for (d, s), v in dummies.items() if s in NIGHT_SHIFTS]
-            day_missing = [v for (d, s), v in dummies.items() if s in DAY_SHIFTS]
-            night_priority_weight = 10 * len(day_missing) + 1
+            # 不足人数を優先群ごとに最小化する。
+            # 第1群：A/B宿直・A/B日直（同順位）、第2群：外来宿直、第3群：外来日直。
+            # 各不足変数の上限は10。下位群全体の最大損失より大きい重みを使う。
+            primary_missing = [v for (d, s), v in dummies.items()
+                               if s in ("A宿直", "B宿直", "A日直", "B日直")]
+            outpatient_night_missing = [v for (d, s), v in dummies.items() if s == "外来宿直"]
+            outpatient_day_missing = [v for (d, s), v in dummies.items() if s == "外来日直"]
+            outpatient_night_weight = 10 * len(outpatient_day_missing) + 1
+            primary_weight = (
+                10 * len(outpatient_night_missing) * outpatient_night_weight
+                + 10 * len(outpatient_day_missing) + 1
+            )
             relax_model.Minimize(
-                night_priority_weight * sum(night_missing) + sum(day_missing)
+                primary_weight * sum(primary_missing)
+                + outpatient_night_weight * sum(outpatient_night_missing)
+                + sum(outpatient_day_missing)
             )
 
             relax_solver = cp_model.CpSolver()
@@ -1530,9 +1539,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 partial_df = pd.DataFrame(partial_schedule_list)
 
                 if bottlenecks:
-                    reasons.append("宿直（A宿直・B宿直・外来宿直）の不足を最優先で減らし、その次に日直を埋める方針で作成しました。条件によっては宿直にも不足が残ります。")
+                    reasons.append("A宿直・B宿直・A日直・B日直を同順位で最優先とし、次に外来宿直、最後に外来日直の不足を減らす方針で作成しました。条件によっては優先枠にも不足が残ります。")
                     if relax_status == cp_model.FEASIBLE:
-                        reasons.append("計算時間内に得られた案です。宿直の不足が最小であることまでは確認できていません。")
+                        reasons.append("計算時間内に得られた案です。優先順位に沿った不足の最小化が完了したことまでは確認できていません。")
                     reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
                     reasons.extend(bottlenecks)
                     reasons.append("")
