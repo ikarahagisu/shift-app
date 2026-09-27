@@ -413,6 +413,47 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
 
 
+def show_input_errors(messages):
+    messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
+    st.error(f"入力内容を確認してください（{len(messages)}件）")
+    st.dataframe(pd.DataFrame({"修正が必要な項目": messages}), hide_index=True, use_container_width=True)
+
+
+def show_schedule_notice(result, messages):
+    messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
+    if result is None:
+        st.error("当直案を作成できませんでした。")
+        if messages:
+            st.dataframe(pd.DataFrame({"確認する内容": messages}), hide_index=True, use_container_width=True)
+        return
+    shortage_rows = []
+    for _, row in result.iterrows():
+        for slot in ALL_SHIFT_TYPES:
+            match = re.search(r'⚠️不足\((\d+)名\)', str(row.get(slot, '')))
+            if match:
+                shortage_rows.append({"日付": row['日付'], "当直枠": slot, "不足人数": int(match.group(1))})
+    if shortage_rows:
+        total = sum(r['不足人数'] for r in shortage_rows)
+        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{total}名分")
+        st.caption("条件を見直して再作成するか、当直案のCSVをダウンロードして不足枠を調整してください。")
+        with st.expander("不足している日付・枠を確認", expanded=False):
+            st.dataframe(pd.DataFrame(shortage_rows), hide_index=True, use_container_width=True)
+    else:
+        st.success("必要人数を満たす当直案ができました。")
+    # 不足の見出し・日別列挙・合計は上の表に集約。計算状態や例外の説明は残す。
+    details = []
+    for message in messages:
+        if message.startswith(('🚨 **以下の枠', '📊 **【不足している枠')):
+            continue
+        if re.fullmatch(r'・\d+/\d+ の「.+」', message) or re.fullmatch(r'・.+： 計 \d+ 枠不足', message):
+            continue
+        details.append(message)
+    if details:
+        st.caption(f"計算状況・条件の注意事項：{len(details)}件あります。")
+        with st.expander("計算状況・条件の注意事項を確認", expanded=False):
+            st.dataframe(pd.DataFrame({"確認する内容": details}), hide_index=True, use_container_width=True)
+
+
 # ページ設定
 st.set_page_config(page_title="当直作成アプリ", layout="wide")
 st.title("当直作成アプリ")
@@ -1005,7 +1046,7 @@ edited_df = st.data_editor(
 staff_df = edited_df.reset_index()
 staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
 if staff_input_errors:
-    for message in staff_input_errors: st.error(message)
+    show_input_errors(staff_input_errors)
     st.stop()
 
 st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
@@ -1769,7 +1810,7 @@ staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
 fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['先生の名前'].tolist(), year, month)
 if fixed_input_errors:
-    for message in fixed_input_errors: st.error(message)
+    show_input_errors(fixed_input_errors)
     st.stop()
 current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
@@ -1791,28 +1832,13 @@ if len(staff_df) > 0:
                     st.session_state['generated_month'] = month
                     st.session_state['generated_warnings'] = error_reasons
                     st.session_state['result_needs_refresh'] = False
-                if success:
+                if df_result is not None and not df_result.empty:
                     st.session_state['generated_df'] = df_result
-                    st.session_state['past_worked_dates'] = past_worked_dates
-                    st.session_state['future_worked_dates'] = future_worked_dates
-                    st.success("✨ 必要人数を満たす当直案ができました。確定勤務・勤務間隔・各種回数・希望日の反映を確認してください。月間最小回数は未達の場合があり、確定指定で上限を超えた場合や、確定勤務同士の間隔が短い場合は警告を確認してください。")
-                    
-
-                            
+                    st.session_state['past_worked_dates'] = past_worked_dates or {}
+                    st.session_state['future_worked_dates'] = future_worked_dates or {}
                 else:
-                    if df_result is not None and not df_result.empty:
-                        st.session_state['generated_df'] = df_result
-                        st.session_state['past_worked_dates'] = past_worked_dates or {}
-                        st.session_state['future_worked_dates'] = future_worked_dates or {}
-                        
-                        st.error("⚠️ **不足枠を含む当直案です。赤い「⚠️不足」の人数を確認してください。**")
-                        st.info("👇 条件を見直して再作成するか、CSVをダウンロードしてExcelなどで不足枠を調整してください。")
-                    else:
-                        if 'generated_df' in st.session_state:
-                            del st.session_state['generated_df']
-                        st.error("❌ **今回は当直案を作成できませんでした。表示された内容と入力条件を確認してください。**")
-                        for reason in error_reasons:
-                            st.write(reason)
+                    st.session_state.pop('generated_df', None)
+                    show_schedule_notice(None, error_reasons)
             except Exception as e:
                 st.session_state.pop('generated_df', None)
                 st.error(f"当直計算中にエラーが発生しました。詳細: {e}")
@@ -1820,8 +1846,7 @@ if len(staff_df) > 0:
     if 'generated_df' in st.session_state:
         year = st.session_state['generated_year']
         month = st.session_state['generated_month']
-        for message in st.session_state.get('generated_warnings', []):
-            st.warning(message)
+        show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []))
         df_result = st.session_state['generated_df'].reindex(columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"])
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
