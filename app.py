@@ -421,24 +421,21 @@ def show_input_errors(messages):
 
 def show_schedule_notice(result, messages):
     messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
+    shortage_rows = []
+    if result is not None:
+        for _, row in result.iterrows():
+            for slot in ALL_SHIFT_TYPES:
+                match = re.search(r'⚠️不足\((\d+)名\)', str(row.get(slot, '')))
+                if match:
+                    shortage_rows.append(int(match.group(1)))
+    # 最重要の結果を、説明より先に表示する。
     if result is None:
         st.error("当直案を作成できませんでした。")
-        if messages:
-            st.dataframe(pd.DataFrame({"確認する内容": messages}), hide_index=True, use_container_width=True)
-        return
-    shortage_rows = []
-    for _, row in result.iterrows():
-        for slot in ALL_SHIFT_TYPES:
-            match = re.search(r'⚠️不足\((\d+)名\)', str(row.get(slot, '')))
-            if match:
-                shortage_rows.append({"日付": row['日付'], "当直枠": slot, "不足人数": int(match.group(1))})
-    if shortage_rows:
-        total = sum(r['不足人数'] for r in shortage_rows)
-        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{total}名分")
-        st.caption("条件を見直して再作成するか、当直案のCSVをダウンロードして不足枠を調整してください。")
+    elif shortage_rows:
+        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{sum(shortage_rows)}名分")
     else:
         st.success("必要人数を満たす当直案ができました。")
-    # 不足は件数の要約と当直案で示し、重複した列挙を省く。計算状態や例外は残す。
+
     details = []
     for message in messages:
         if message.startswith(('🚨 **以下の枠', '📊 **【不足している枠')):
@@ -446,9 +443,16 @@ def show_schedule_notice(result, messages):
         if re.fullmatch(r'・\d+/\d+ の「.+」', message) or re.fullmatch(r'・.+： 計 \d+ 枠不足', message):
             continue
         details.append(message)
-    if details:
-        st.caption(f"計算状況・条件の注意事項：{len(details)}件あります。")
-        st.dataframe(pd.DataFrame({"確認する内容": details}), hide_index=True, use_container_width=True)
+    if details or result is None or shortage_rows:
+        with st.container(border=True):
+            st.markdown("**計算状況・条件の注意事項と対処方法**")
+            for message in details:
+                st.markdown(message)
+            if result is None or shortage_rows:
+                st.markdown("**条件を見直す場合**")
+                st.write("入力内容を確認し、実際に調整できる範囲で、月間・休日・枠別の上限や勤務間隔を見直して再作成してください。")
+            if shortage_rows:
+                st.write("不足箇所は当直案の「⚠️不足」で確認できます。手動調整する場合はCSVをダウンロードし、Excelなどで編集してください。")
 
 
 # ページ設定
@@ -1805,14 +1809,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
-st.info("各医師の「NG日を保存する」を押したら、「当直案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
-with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
-    st.markdown("""
-- 表に「⚠️不足」と表示された枠は、必要人数を満たしていません。
-- 入力内容を確認し、実際に調整できる範囲で、月間・休日・枠別の上限や勤務間隔を見直して再作成してください。
-- 時間内に当直案を見つけられない場合もあります。
-- 結果表は、この画面では直接編集できません。手動調整する場合はCSVをダウンロードし、Excelなどで編集してください。
-    """)
+result_notice_container = st.container()
 
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
@@ -1849,15 +1846,18 @@ if len(staff_df) > 0:
                     st.session_state['future_worked_dates'] = future_worked_dates or {}
                 else:
                     st.session_state.pop('generated_df', None)
-                    show_schedule_notice(None, error_reasons)
+                    with result_notice_container:
+                        show_schedule_notice(None, error_reasons)
             except Exception as e:
                 st.session_state.pop('generated_df', None)
-                st.error(f"当直計算中にエラーが発生しました。詳細: {e}")
+                with result_notice_container:
+                    show_schedule_notice(None, [f"当直計算中にエラーが発生しました。詳細: {e}"])
 
     if 'generated_df' in st.session_state:
         year = st.session_state['generated_year']
         month = st.session_state['generated_month']
-        show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []))
+        with result_notice_container:
+            show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []))
         df_result = st.session_state['generated_df'].reindex(columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"])
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
