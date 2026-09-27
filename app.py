@@ -634,6 +634,8 @@ div[data-testid="stForm"]:has([data-ng-state]) [data-testid="stVerticalBlock"] {
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
+st.markdown('\n<style>\n/* 本文の見出しだけに適用。カレンダーや結果表の部品には影響しない。 */\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1,\n.main [data-testid="stHeadingWithActionElements"] h1 {\n    font-size: 1.9rem !important;\n    line-height: 1.4 !important;\n    font-weight: 750 !important;\n    padding: 0 0 .6rem !important;\n}\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2,\n.main [data-testid="stHeadingWithActionElements"] h2 {\n    font-size: 1.3rem !important;\n    line-height: 1.5 !important;\n    font-weight: 700 !important;\n    background: var(--secondary-background-color, #f0f3f7);\n    border-left: 5px solid #47749b;\n    border-radius: 0 8px 8px 0;\n    padding: .85rem 1rem !important;\n    margin: .4rem 0 .35rem !important;\n}\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3,\n.main [data-testid="stHeadingWithActionElements"] h3 {\n    font-size: 1.08rem !important;\n    line-height: 1.55 !important;\n    font-weight: 700 !important;\n    padding: .45rem 0 .6rem !important;\n    border-bottom: 1px solid rgba(128, 144, 160, .3);\n    margin: .2rem 0 .15rem !important;\n}\n[data-testid="stMain"] [data-testid="stMarkdownContainer"] hr,\n.main [data-testid="stMarkdownContainer"] hr {\n    margin: 1.4rem 0 !important;\n    border: 0;\n    border-top: 1px solid rgba(128, 144, 160, .35);\n}\n[data-testid="stMetricLabel"] p {font-size: .9rem !important; line-height: 1.5 !important;}\n[data-testid="stMetricValue"] {font-size: 1.8rem !important; line-height: 1.25 !important;}\n@media (max-width:600px) {\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1 {font-size:1.6rem !important;}\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2 {font-size:1.15rem !important; padding:.7rem .75rem !important;}\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3 {font-size:1rem !important;}\n}\n</style>\n', unsafe_allow_html=True)
+
 st.header("📅 年月・休日・必要人数の設定")
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
 
@@ -784,8 +786,6 @@ for _, row in edited_multi_df.iterrows():
         except (ValueError, TypeError):
             pass
 
-st.divider()
-
 # ==========================================
 # 2. 枠数とカレンダー表示（計算・集計）
 # ==========================================
@@ -855,7 +855,7 @@ if "日付" not in base_fixed_df.columns:
 if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
-st.markdown("##### 📅 先月今月来月の確定当直")
+st.markdown("### 📅 先月今月来月の確定当直")
 st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
@@ -963,7 +963,7 @@ for c in text_cols:
     if c in base_df.columns:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
-st.markdown("##### 👩‍⚕️ 医師条件の入力・編集")
+st.markdown("### 👩‍⚕️ 医師条件の入力・編集")
 st.write("セルをクリックして編集できます。列名にマウスを合わせると、入力例や説明が表示されます。医師名は重複しない表記にしてください。")
 
 edited_df = st.data_editor(
@@ -1008,7 +1008,7 @@ if staff_input_errors:
     for message in staff_input_errors: st.error(message)
     st.stop()
 
-st.markdown("##### ⚖️ 必要枠数と担当可能回数の目安")
+st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
 st.caption("月間最大回数の合計と必要枠数を比較しています。プラスでも、NG日・勤務間隔・枠別上限などによっては埋まらない場合があります。確定指定で追加される枠や上限の例外は、この目安に含まれません。")
 
 if "月間最大回数" in staff_df.columns:
@@ -1027,7 +1027,7 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
 st.divider()
 
-st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
+st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("医師名のタブを選び、当直NGを選択してください。最後に「NG日を保存する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
@@ -1156,7 +1156,7 @@ if not valid_staff.empty:
 
 
 st.divider()
-st.markdown("##### 📂 医師条件をCSVで保存（次回も使う場合）")
+st.markdown("### 📂 医師条件をCSVで保存（次回も使う場合）")
 st.write("医師名・回数・勤務間隔・希望日・保存済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
 st.caption("保存前に、各医師の「NG日を保存する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
@@ -1834,7 +1834,7 @@ if len(staff_df) > 0:
         table_container = st.container()
         
         st.divider()
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の医師の当直を色別でハイライト</span>", unsafe_allow_html=True)
+        st.subheader("🔍 特定の医師の当直を色別でハイライト")
         st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
         c1, c2 = st.columns(2)
