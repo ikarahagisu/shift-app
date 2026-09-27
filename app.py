@@ -1789,6 +1789,14 @@ if len(staff_df) > 0:
             horizontal_ng_component(
                 build_hover_schedule_html(df_result, shift_columns, doctors_list, color_highlighted_doctor)
             )(key="hover_schedule_table", default=None)
+
+            csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 表示中のシフト案をCSVでダウンロード",
+                data=csv_result,
+                file_name=f"shift_{year}_{month}_result.csv",
+                mime="text/csv",
+            )
         
         st.divider()
         st.subheader("📊 シフト案の担当回数・希望日・勤務間隔")
@@ -1894,13 +1902,7 @@ if len(staff_df) > 0:
         summary_height = len(df_summary) * 35 + 40
         st.dataframe(styled_summary, use_container_width=True, height=summary_height)
         
-        csv_result = df_result.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 表示中のシフト案をCSVでダウンロード",
-            data=csv_result,
-            file_name=f"shift_{year}_{month}_result.csv",
-            mime="text/csv",
-        )
+
 
 elif len(staff_df) == 0:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
