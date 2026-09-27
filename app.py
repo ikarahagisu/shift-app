@@ -176,8 +176,8 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
         .doctor{display:inline-block;border-radius:4px;padding:2px 4px;outline-offset:1px;cursor:default}
         .doctor.match{background:#ffeb70!important;color:#111!important;outline:2px solid #bf7100;font-weight:800}
         .doctor:focus-visible{outline:2px solid #bf7100}
-        .note{font-size:16px;line-height:1.7;font-weight:700;color:#17365d;background:#eff6ff;border:1px solid #b6cff0;border-left:5px solid #2563a6;border-radius:8px;padding:12px 16px;margin:0 0 12px;overflow-wrap:anywhere}
-        """, '</style><body><p class="note">名前にカーソルを合わせると同じ医師を強調します。スマートフォンでは名前をタップすると固定し、もう一度タップすると解除します。</p><div class="scroll"><table><colgroup><col style="width:12%"><col style="width:10%"><col span="6" style="width:13%"></colgroup><thead><tr>']
+        .note{font-size:16px;line-height:1.7;font-weight:500;color:#243247;margin:0 0 12px;overflow-wrap:anywhere}
+        """, '</style><body><p class="note">名前にカーソルを合わせると同じ医師を強調します。クリックするとカーソルを外しても強調表示が続き、同じ名前をもう一度クリックすると解除します。スマートフォンではタップで同じ操作ができます。</p><div class="scroll"><table><colgroup><col style="width:12%"><col style="width:10%"><col span="6" style="width:13%"></colgroup><thead><tr>']
     parts.extend('<th>'+html.escape(str(c))+'</th>' for c in df.columns)
     parts.append('</tr></thead><tbody>')
     for _, row in df.iterrows():
