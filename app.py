@@ -299,6 +299,21 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
             parts.append('</td>')
         parts.append('</tr>')
     parts.append("""</tbody></table></div><script>
+    function notify(type,data={}) {
+        window.parent.postMessage({isStreamlitMessage:true,type,...data},'*');
+    }
+    let lastHeight=0;
+    function resizeFrame() {
+        const height=Math.ceil(document.body.getBoundingClientRect().height)+8;
+        if(height!==lastHeight){lastHeight=height;notify('streamlit:setFrameHeight',{height});}
+    }
+    notify('streamlit:componentReady',{apiVersion:1});
+    window.addEventListener('message',e=>{
+        if(e.data && e.data.type==='streamlit:render')requestAnimationFrame(resizeFrame);
+    });
+    new ResizeObserver(resizeFrame).observe(document.body);
+    if(document.fonts)document.fonts.ready.then(resizeFrame);
+    requestAnimationFrame(resizeFrame);
     const names=[...document.querySelectorAll('.doctor')];
     let pinned=null;
     function highlight(id){names.forEach(el=>el.classList.toggle('match',el.dataset.doctor===id));}
@@ -315,8 +330,8 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
     return ''.join(parts)
 
 # ページ設定
-st.set_page_config(page_title="シフト作成アプリ", layout="wide")
-st.title("当直・日直 自動シフト作成アプリ")
+st.set_page_config(page_title="当直作成アプリ", layout="wide")
+st.title("当直作成アプリ")
 st.caption("年月・勤務条件・NG日を入力して、シフト表の案を作成します。")
 with st.expander("初めて使う方へ：入力からダウンロードまで", expanded=False):
     st.markdown("""
@@ -1770,12 +1785,10 @@ if len(staff_df) > 0:
         result_height = len(df_result) * 35 + 40
         
         with table_container:
-            import streamlit.components.v1 as components
-            components.html(
-                build_hover_schedule_html(df_result, shift_columns, doctors_list, color_highlighted_doctor),
-                height=len(df_result) * 48 + 130,
-                scrolling=False,
-            )
+            # 表の実測高を通知するコンポーネントで余分な空白を作らない。
+            horizontal_ng_component(
+                build_hover_schedule_html(df_result, shift_columns, doctors_list, color_highlighted_doctor)
+            )(key="hover_schedule_table", default=None)
         
         st.divider()
         st.subheader("📊 シフト案の担当回数・希望日・勤務間隔")
