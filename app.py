@@ -1175,7 +1175,7 @@ with col_dl_fixed:
         mime="text/csv",
     )
 with col_ul_fixed:
-    fixed_file = st.file_uploader("過去・決定済み当直表（CSV）をアップロード", type="csv", key="fixed_csv")
+    fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key="fixed_csv")
 
 if fixed_file is not None:
     try:
