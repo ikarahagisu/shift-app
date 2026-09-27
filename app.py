@@ -1362,7 +1362,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             warnings.append("⚠️ **【重要】以下の枠は「決定済みシフト」や「優先度100」が重なったため、AIが自動的に定員を拡張（2名以上配置）してシフトを完成させました:**")
             warnings.extend([f"・{w}" for w in over_cap_warnings])
             
-        return pd.DataFrame(schedule_list), True, warnings, past_worked_dates, future_worked_dates
+        return pd.DataFrame(schedule_list, columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"]), True, warnings, past_worked_dates, future_worked_dates
     
     else:
         # =========================================================
@@ -1536,7 +1536,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                             
                     partial_schedule_list.append(row_dict)
 
-                partial_df = pd.DataFrame(partial_schedule_list)
+                partial_df = pd.DataFrame(partial_schedule_list, columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"])
 
                 if bottlenecks:
                     reasons.append("A宿直・B宿直・A日直・B日直を同順位で最優先とし、次に外来宿直、最後に外来日直の不足を減らす方針で作成しました。条件によっては優先枠にも不足が残ります。")
@@ -1614,7 +1614,7 @@ if len(staff_df) > 0:
                 st.error(f"シフト計算中にエラーが発生しました。詳細: {e}")
 
     if 'generated_df' in st.session_state:
-        df_result = st.session_state['generated_df']
+        df_result = st.session_state['generated_df'].reindex(columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"])
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
         
