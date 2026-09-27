@@ -741,6 +741,8 @@ with st.container(key="special_holiday_calendar"):
                         ):
                             custom_holidays.append(day)
 
+holiday_total_placeholder = st.empty()
+
 st.divider()
 
 st.subheader("👥 1つの枠を2名以上にする設定（任意）")
@@ -801,6 +803,7 @@ for d in range(1, num_days + 1):
             shift_counts[s] += multi_slots_dict.get((d, s), 1)
 
 total_slots = sum(shift_counts.values())
+holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
 
 st.divider()
 
