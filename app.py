@@ -1071,7 +1071,6 @@ st.download_button(
     use_container_width=True
 )
 
-st.divider()
 
 # ==========================================
 # 4. 当直計算ロジック（関数）
