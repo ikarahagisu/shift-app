@@ -269,7 +269,7 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
     parts = ['<!doctype html><html lang="ja"><meta charset="utf-8"><style>',
         """
         *{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;color:#243247;background:white}
-        .scroll{overflow:auto;max-height:1100px;border:1px solid #d6dce5;border-radius:6px}
+        .scroll{overflow-x:auto;border:1px solid #d6dce5;border-radius:6px}
         table{border-collapse:separate;border-spacing:0;width:100%;white-space:nowrap}
         th,td{padding:7px 9px;border-bottom:1px solid #e4e7ed;border-right:1px solid #e4e7ed;text-align:left}
         th{position:sticky;top:0;background:#f3f5f8;z-index:1}
@@ -1773,8 +1773,8 @@ if len(staff_df) > 0:
             import streamlit.components.v1 as components
             components.html(
                 build_hover_schedule_html(df_result, shift_columns, doctors_list, color_highlighted_doctor),
-                height=min(1160, len(df_result) * 48 + 130),
-                scrolling=True,
+                height=len(df_result) * 48 + 130,
+                scrolling=False,
             )
         
         st.divider()
