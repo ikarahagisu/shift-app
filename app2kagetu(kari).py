@@ -76,62 +76,42 @@ def parse_fixed_csv(file_bytes):
     return df
 
 def parse_shift_date(date_value, target_year, target_month):
+    if pd.isna(date_value): return None
+    if isinstance(date_value, datetime.datetime): return date_value.date()
+    if isinstance(date_value, datetime.date): return date_value
+    text=str(date_value).strip().translate(str.maketrans('０１２３４５６７８９／－', '0123456789/-'))
+    text=re.sub(r'\([月火水木金土日]\)$','',text).strip()
+    full=re.fullmatch(r'(\d{4})[年/.-](\d{1,2})[月/.-](\d{1,2})日?(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?',text)
+    short=re.fullmatch(r'(\d{1,2})[月/.-](\d{1,2})日?',text)
+    if full:
+        y,m,d=map(int,full.groups())
+    elif short:
+        m,d=map(int,short.groups());y=target_year
+        if m-target_month>=6:y-=1
+        elif target_month-m>=6:y+=1
+    else:return None
+    try:return datetime.date(y,m,d)
+    except ValueError:return None
+
+
+def next_day_is_holiday(date_obj, target_year, target_month, custom_holidays, next_month_day1_special=False):
+    """勤務日の翌日が、翌日PM dutyの宿直制限を外す休日か。
+
+    土日・国民の祝日と、当月カレンダーの特別休日を見る。
+    月末の翌日は翌月1日なので、画面でその日を特別休日にしたときだけ休日にする。
+    この指定では翌月の日直枠は作らない。
     """
-    日付文字列を datetime.date に変換する。
-    対応例:
-    - YYYY/M/D, YYYY-MM-DD, YYYY年M月D日
-    - M/D, M-D, M月D日（年は target_year / target_month から推定）
-    """
-    if isinstance(date_value, datetime.datetime):
-        return date_value.date()
-    if isinstance(date_value, datetime.date):
-        return date_value
-    if isinstance(date_value, pd.Timestamp):
-        return date_value.date()
+    next_date = date_obj + datetime.timedelta(days=1)
+    if next_date.weekday() >= 5 or jpholiday.is_holiday(next_date):
+        return True
+    if (next_date.year, next_date.month) == (target_year, target_month) and next_date.day in custom_holidays:
+        return True
+    return bool(
+        next_month_day1_special
+        and next_date.day == 1
+        and (next_date.year, next_date.month) != (target_year, target_month)
+    )
 
-    text = str(date_value).strip()
-    if not text or text.lower() in {"nan", "none"}:
-        return None
-
-    # 年を含む日付は pandas パーサを優先（例: 2026-04-01T00:00:00）
-    has_year = re.search(r'(^|[^\d])\d{4}([^\d]|$)', text) is not None
-    if has_year:
-        parsed = pd.to_datetime(text, errors="coerce")
-        if pd.notna(parsed):
-            return parsed.date()
-
-    # 例: 2026/4/1, 2026-04-01, 2026年4月1日
-    full_match = re.search(r'(\d{4})\s*[/-年.]\s*(\d{1,2})\s*[/-月.]\s*(\d{1,2})', text)
-    if full_match:
-        y, m, d = map(int, full_match.groups())
-        try:
-            return datetime.date(y, m, d)
-        except ValueError:
-            return None
-
-    # 例: 4/1, 4-1, 4月1日
-    short_match = re.search(r'(\d{1,2})\s*[/-月.]\s*(\d{1,2})', text)
-    if not short_match:
-        return None
-
-    m, d = map(int, short_match.groups())
-    if m == target_month:
-        y = target_year
-    elif m == 12 and target_month == 1:
-        y = target_year - 1
-    elif m == 1 and target_month == 12:
-        y = target_year + 1
-    elif m > target_month and (m - target_month) >= 6:
-        y = target_year - 1
-    elif m < target_month and (target_month - m) >= 6:
-        y = target_year + 1
-    else:
-        y = target_year
-
-    try:
-        return datetime.date(y, m, d)
-    except ValueError:
-        return None
 
 # ==========================================
 # カレンダー一括操作用の裏側ロジック
@@ -147,7 +127,7 @@ def set_all_ng(doc_name, y, m, ndays, val, custom_hols=[]):
             st.session_state[f"ng_{doc_name}_{y}_{m}_{d}"] = "全NG" if is_hol else "宿NG"
 
 # ==========================================
-# 【改善】勤務間隔制約：IntervalVar + AddNoOverlap
+# 勤務間隔制約：自動割当は確定勤務・月外勤務との間隔も守る
 # ==========================================
 def add_interval_constraints(
     model,
@@ -163,88 +143,24 @@ def add_interval_constraints(
     absolute_req_days,
     absolute_req_specific,
 ):
-    """
-    勤務間隔制約を IntervalVar + AddNoOverlap で実装する。
-
-    変更前：全日付ペア×全枠ペアを列挙する4重ループ O(doc × d² × s²)
-            医師20名・31日・6枠 → 約357,000制約
-
-    変更後：IntervalVar + AddNoOverlap O(doc × d × s)
-            医師20名・31日・6枠 → 約3,720変数のみ
-
-    考え方：
-        「勤務間に N 日以上空ける」は
-        「各勤務を長さ (N+1) の区間とみなして重ならせない」と等価。
-
-        例）interval=5, d=10 に勤務 → 区間 [9, 15)
-            d=14 に勤務 → 区間 [13, 19) ← 重なる → 禁止（4日しか空かない）
-            d=15 に勤務 → 区間 [14, 20) ← 重ならない → OK（5日空いている）
-    """
-    month_start = datetime.date(target_year, target_month, 1)
-
+    """確定同士は維持し、自動割当と全勤務の間隔を制限する。"""
     for doc in doctors:
-        interval = min_intervals[doc]
-        if interval <= 0:
-            continue
-
-        # 絶対希望日は間隔制約から除外（ハード制約で確定済み）
-        abs_dates = set(absolute_req_days[doc]) | {d for d, _ in absolute_req_specific[doc]}
-
-        intervals_for_doc = []
-
-        # ① 今月の各勤務日を Optional IntervalVar に変換
-        for d in range(1, num_days + 1):
-            if d in abs_dates:
-                continue
-
-            active = daily_active_shifts.get(d, [])
-            worked_vars = [shifts[(d, doc, s)] for s in active if (d, doc, s) in shifts]
-            if not worked_vars:
-                continue
-
-            is_working = model.NewBoolVar(f"is_working_{doc}_d{d}")
-            model.AddMaxEquality(is_working, worked_vars)
-
-            interval_var = model.NewOptionalIntervalVar(
-                start=d - 1,            # 0-indexed
-                size=interval + 1,
-                end=d - 1 + interval + 1,
-                is_present=is_working,
-                name=f"interval_{doc}_d{d}",
-            )
-            intervals_for_doc.append(interval_var)
-
-        # ② 過去の勤務日を固定区間として追加（月初の間隔チェック用）
-        for past_date in past_worked_dates.get(doc, []):
-            days_before = (month_start - past_date).days
-            start = -days_before
-            end = start + interval + 1
-            if end <= 0:
-                continue  # 月内に全く影響しない
-            intervals_for_doc.append(
-                model.NewFixedSizeIntervalVar(
-                    start=start,
-                    size=interval + 1,
-                    name=f"past_{doc}_{past_date}",
-                )
-            )
-
-        # ③ 将来の勤務日を固定区間として追加（月末の間隔チェック用）
-        for future_date in future_worked_dates.get(doc, []):
-            days_after = (future_date - month_start).days
-            if days_after >= num_days:
-                continue  # 月内に全く影響しない
-            intervals_for_doc.append(
-                model.NewFixedSizeIntervalVar(
-                    start=days_after,
-                    size=interval + 1,
-                    name=f"future_{doc}_{future_date}",
-                )
-            )
-
-        # ④ 全区間が重ならない = 勤務間に interval 日以上空く
-        if len(intervals_for_doc) >= 2:
-            model.AddNoOverlap(intervals_for_doc)
+        gap=min_intervals[doc]
+        fixed_days=set(absolute_req_days[doc]) | {d for d,s in absolute_req_specific[doc]}
+        external=set(past_worked_dates.get(doc,[])) | set(future_worked_dates.get(doc,[]))
+        worked={}
+        for d in range(1,num_days+1):
+            variables=[shifts[d,doc,s] for s in daily_active_shifts.get(d,[]) if (d,doc,s) in shifts]
+            if not variables:continue
+            worked[d]=model.NewBoolVar(f'working_{doc}_{d}')
+            model.AddMaxEquality(worked[d],variables)
+            dt=datetime.date(target_year,target_month,d)
+            if d not in fixed_days and any(abs((dt-ext).days)<=gap for ext in external):
+                model.Add(worked[d]==0)
+        for d in worked:
+            for other in range(d+1,min(num_days,d+gap)+1):
+                if other in worked and not(d in fixed_days and other in fixed_days):
+                    model.Add(worked[d]+worked[other]<=1)
 
 
 # 月間・横一列を共通のHTMLコンポーネントで描画。選択はブラウザ内で処理し、保存時だけ送信する。
@@ -259,7 +175,7 @@ def horizontal_ng_component(html_source):
     asset_id = hashlib.sha256(html_source.encode("utf-8")).hexdigest()[:16]
     return components.declare_component(f"shift_ng_{asset_id}", path=str(directory))
 
-HORIZONTAL_NG_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.day.holiday{color:#c92336}.day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}\n\n.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:8px}\n.month .cell{width:auto;min-width:0;padding:5px;flex:none}\n.month .head{height:72px}.weekday{text-align:center;font-weight:700;padding:4px}.blank{min-height:126px;background:#f5f6f8;border-radius:9px}\n@media(max-width:600px){.strip.month{gap:3px}.month .cell{padding:2px;border-width:1px}.month .day{font-size:12px}.month .state{font-size:11px}.month select{font-size:11px;padding:0;height:30px}.month .head{height:66px}.month .blank{min-height:108px}.weekday{font-size:12px}}\n\n/* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */\n.cell,.month .cell{background:#fff;border-color:#cbd2dc}\n.head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}\n.state{width:100%;display:grid;grid-template-rows:repeat(2,29px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}\n.band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}\n.band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}\n.cell[data-state="全NG"] .band{background:#b42332;color:#fff}\n.cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}\n.cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}\n.warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}\n.weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}\n.blank{min-height:176px}\n@media(max-width:600px){.month .head{height:120px}.month .band{font-size:10px}.month .weekday-warning{font-size:15px;padding:0 3px}.month .blank{min-height:160px}}\n\n.weekday-warning{display:inline-flex;align-items:center;justify-content:center;gap:3px;max-width:100%}\n.duty-label{font-size:9px;font-weight:650;line-height:1.15;white-space:nowrap}\n@media(max-width:600px){.month .weekday-warning{gap:1px;padding:0 1px;font-size:12px}.month .duty-label{font-size:8px;white-space:normal;max-width:30px;overflow-wrap:anywhere}}\n\n/* 日付の文字・休日色・警告の有無によらず各段の位置を固定する。 */\n.head,.month .head{\n display:grid;\n grid-template-columns:minmax(0,1fr);\n grid-template-rows:26px 30px 60px;\n justify-content:stretch;\n width:100%;\n min-width:0;\n align-content:end;\n align-items:center;\n justify-items:center;\n gap:4px;\n padding-top:0;\n padding-bottom:0;\n}\n.head > .day{line-height:24px;margin:0;align-self:center}\n.head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}\n.head > .state{height:60px;min-height:60px;margin:0;align-self:end}\n@media(max-width:600px){\n .month .head{grid-template-rows:22px 30px 60px}\n}\n/* 休日はNGの勤務帯をすべて同じ赤にする。平日の宿NGは従来の青。 */\n.cell[data-holiday="true"][data-state="日NG"] .day-band,\n.cell[data-holiday="true"][data-state="宿NG"] .night-band,\n.cell[data-holiday="true"][data-state="全NG"] .band{background:#b42332;color:#fff}\n</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を保存する</button><script>\nlet version=null,days=[],draft=[],seen=null;let mode=\'row\';let frameHeight=0;function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send(\'streamlit:setFrameHeight\',{height:h})}}const labels={OK:\'OK\',\'全NG\':\'✕ 全NG\',\'日NG\':\'☀ 日NG\',\'宿NG\':\'☾ 宿NG\'};\nfunction send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},\'*\')}\nfunction paint(cell,value){cell.dataset.state=value;let holiday=cell.dataset.holiday===\'true\';cell.querySelector(\'.day-band\').textContent=holiday?(value===\'全NG\'||value===\'日NG\'?\'日直NG\':\'日直可\'):\'日直なし\';cell.querySelector(\'.night-band\').textContent=value===\'全NG\'||value===\'宿NG\'?\'宿直NG\':\'宿直可\';}\nwindow.addEventListener(\'message\',(event)=>{if(event.data.type!==\'streamlit:render\')return;let a=event.data.args;document.getElementById(\'apply\').textContent=a.doctor+\'先生のNG日を保存する\';if(a.version!==version){version=a.version;mode=a.mode||\'row\';days=a.days;draft=days.map(d=>d.value);let strip=document.getElementById(\'strip\');strip.replaceChildren();strip.className=\'strip \'+(mode===\'month\'?\'month\':\'\');if(mode===\'month\'){[\'月\',\'火\',\'水\',\'木\',\'金\',\'土\',\'日\'].forEach((w,i)=>{let el=document.createElement(\'div\');el.className=\'weekday\';el.textContent=w;el.style.color=i===6?\'#c92336\':i===5?\'#1670c5\':\'#243247\';strip.append(el)});for(let i=0;i<a.offset;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}days.forEach((d,i)=>{let cell=document.createElement(\'div\');cell.className=\'cell\';cell.dataset.holiday=String(d.options.includes(\'日NG\'));let head=document.createElement(\'div\');head.className=\'head\';let day=document.createElement(\'div\');day.className=\'day \'+d.kind;day.textContent=mode===\'month\'?d.day+\'日\':d.day+\'日（\'+d.weekday+\'）\';let state=document.createElement(\'div\');state.className=\'state\';let dayBand=document.createElement(\'div\');dayBand.className=\'band day-band\'+(d.options.includes(\'日NG\')?\'\':\' off\');let nightBand=document.createElement(\'div\');nightBand.className=\'band night-band\';state.append(dayBand,nightBand);let warningSlot=document.createElement(\'div\');warningSlot.className=\'warning-slot\';if(d.warning){let warning=document.createElement(\'span\');warning.className=\'weekday-warning\';warning.textContent=\'⚠︎\';let duty=document.createElement(\'small\');duty.className=\'duty-label\';duty.textContent=\'翌日PM duty\';warning.append(duty);warning.title=\'翌日PM duty（翌日が休日なら例外あり）\';warning.setAttribute(\'aria-label\',warning.title);warningSlot.append(warning)}head.append(day,warningSlot,state);let sel=document.createElement(\'select\');sel.setAttribute(\'aria-label\',d.day+\'日のNG設定\');d.options.forEach(v=>{let o=document.createElement(\'option\');o.value=v;o.textContent=labels[v];sel.append(o)});sel.value=d.value;sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById(\'note\').textContent=\'未保存の変更があります。選び終わったら下のボタンを押してください。\'};cell.append(head,sel);paint(cell,d.value);strip.append(cell)});if(mode===\'month\'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}document.getElementById(\'note\').textContent=\'NGを選ぶと色が変わります。選び終わったら保存してください。\';}resize()});\ndocument.getElementById(\'apply\').onclick=()=>{send(\'streamlit:setComponentValue\',{value:{version,values:draft,token:Date.now().toString()+\'-\'+Math.random()},dataType:\'json\'});document.getElementById(\'note\').textContent=\'保存しています…\';};new ResizeObserver(resize).observe(document.body);send(\'streamlit:componentReady\',{apiVersion:1});resize();\n</script></body></html>'
+HORIZONTAL_NG_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.day.holiday{color:#c92336}.day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}\n\n.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:8px}\n.month .cell{width:auto;min-width:0;padding:5px;flex:none}\n.month .head{height:72px}.weekday{text-align:center;font-weight:700;padding:4px}.blank{min-height:126px;background:#f5f6f8;border-radius:9px}\n@media(max-width:600px){.strip.month{gap:3px}.month .cell{padding:2px;border-width:1px}.month .day{font-size:12px}.month .state{font-size:11px}.month select{font-size:11px;padding:0;height:30px}.month .head{height:66px}.month .blank{min-height:108px}.weekday{font-size:12px}}\n\n/* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */\n.cell,.month .cell{background:#fff;border-color:#cbd2dc}\n.head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}\n.state{width:100%;display:grid;grid-template-rows:repeat(2,29px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}\n.band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}\n.band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}\n.cell[data-state="全NG"] .band{background:#b42332;color:#fff}\n.cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}\n.cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}\n.warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}\n.weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}\n.blank{min-height:176px}\n@media(max-width:600px){.month .head{height:120px}.month .band{font-size:10px}.month .weekday-warning{font-size:15px;padding:0 3px}.month .blank{min-height:160px}}\n\n.weekday-warning{display:inline-flex;align-items:center;justify-content:center;gap:3px;max-width:100%}\n.duty-label{font-size:9px;font-weight:650;line-height:1.15;white-space:nowrap}\n@media(max-width:600px){.month .weekday-warning{gap:1px;padding:0 1px;font-size:12px}.month .duty-label{font-size:8px;white-space:normal;max-width:30px;overflow-wrap:anywhere}}\n\n/* 日付の文字・休日色・警告の有無によらず各段の位置を固定する。 */\n.head,.month .head{\n display:grid;\n grid-template-columns:minmax(0,1fr);\n grid-template-rows:26px 30px 60px;\n justify-content:stretch;\n width:100%;\n min-width:0;\n align-content:end;\n align-items:center;\n justify-items:center;\n gap:4px;\n padding-top:0;\n padding-bottom:0;\n}\n.head > .day{line-height:24px;margin:0;align-self:center}\n.head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}\n.head > .state{height:60px;min-height:60px;margin:0;align-self:end}\n@media(max-width:600px){\n .month .head{grid-template-rows:22px 30px 60px}\n}\n/* 休日はNGの勤務帯をすべて同じ赤にする。平日の宿NGは従来の青。 */\n.cell[data-holiday="true"][data-state="日NG"] .day-band,\n.cell[data-holiday="true"][data-state="宿NG"] .night-band,\n.cell[data-holiday="true"][data-state="全NG"] .band{background:#b42332;color:#fff}\n</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を保存する</button><script>\nlet version=null,days=[],draft=[],seen=null;let mode=\'row\';let frameHeight=0;function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send(\'streamlit:setFrameHeight\',{height:h})}}const labels={OK:\'OK\',\'全NG\':\'✕ 全NG\',\'日NG\':\'☀ 日NG\',\'宿NG\':\'☾ 宿NG\'};\nfunction send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},\'*\')}\nfunction paint(cell,value){cell.dataset.state=value;let holiday=cell.dataset.holiday===\'true\';cell.querySelector(\'.day-band\').textContent=holiday?(value===\'全NG\'||value===\'日NG\'?\'日直NG\':\'日直可\'):\'日直なし\';cell.querySelector(\'.night-band\').textContent=value===\'全NG\'||value===\'宿NG\'?\'宿直NG\':\'宿直可\';}\nwindow.addEventListener(\'message\',(event)=>{if(event.data.type!==\'streamlit:render\')return;let a=event.data.args;document.getElementById(\'apply\').textContent=a.doctor+\'先生のNG日を保存する\';if(a.version!==version){version=a.version;mode=a.mode||\'row\';days=a.days;draft=days.map(d=>d.value);let strip=document.getElementById(\'strip\');strip.replaceChildren();strip.className=\'strip \'+(mode===\'month\'?\'month\':\'\');if(mode===\'month\'){[\'月\',\'火\',\'水\',\'木\',\'金\',\'土\',\'日\'].forEach((w,i)=>{let el=document.createElement(\'div\');el.className=\'weekday\';el.textContent=w;el.style.color=i===6?\'#c92336\':i===5?\'#1670c5\':\'#243247\';strip.append(el)});for(let i=0;i<a.offset;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}days.forEach((d,i)=>{let cell=document.createElement(\'div\');cell.className=\'cell\';cell.dataset.holiday=String(d.options.includes(\'日NG\'));let head=document.createElement(\'div\');head.className=\'head\';let day=document.createElement(\'div\');day.className=\'day \'+d.kind;day.textContent=mode===\'month\'?d.day+\'日\':d.day+\'日（\'+d.weekday+\'）\';let state=document.createElement(\'div\');state.className=\'state\';let dayBand=document.createElement(\'div\');dayBand.className=\'band day-band\'+(d.options.includes(\'日NG\')?\'\':\' off\');let nightBand=document.createElement(\'div\');nightBand.className=\'band night-band\';state.append(dayBand,nightBand);let warningSlot=document.createElement(\'div\');warningSlot.className=\'warning-slot\';if(d.warning){let warning=document.createElement(\'span\');warning.className=\'weekday-warning\';warning.textContent=\'⚠︎\';let duty=document.createElement(\'small\');duty.className=\'duty-label\';duty.textContent=\'翌日PM duty\';warning.append(duty);warning.title=\'翌日PM duty（翌日が土日祝・特別休日なら例外。月末は翌月1日の指定も含む）\';warning.setAttribute(\'aria-label\',warning.title);warningSlot.append(warning)}head.append(day,warningSlot,state);let sel=document.createElement(\'select\');sel.setAttribute(\'aria-label\',d.day+\'日のNG設定\');d.options.forEach(v=>{let o=document.createElement(\'option\');o.value=v;o.textContent=labels[v];sel.append(o)});sel.value=d.value;sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById(\'note\').textContent=\'未保存の変更があります。選び終わったら下のボタンを押してください。\'};cell.append(head,sel);paint(cell,d.value);strip.append(cell)});if(mode===\'month\'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}document.getElementById(\'note\').textContent=\'NGを選ぶと色が変わります。選び終わったら保存してください。\';}resize()});\ndocument.getElementById(\'apply\').onclick=()=>{send(\'streamlit:setComponentValue\',{value:{version,values:draft,token:Date.now().toString()+\'-\'+Math.random()},dataType:\'json\'});document.getElementById(\'note\').textContent=\'保存しています…\';};new ResizeObserver(resize).observe(document.body);send(\'streamlit:componentReady\',{apiVersion:1});resize();\n</script></body></html>'
 
 
 def build_hover_schedule_html(df, shift_columns, doctors, color_style):
@@ -279,8 +195,8 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
         .doctor{display:inline-block;border-radius:4px;padding:2px 4px;outline-offset:1px;cursor:default}
         .doctor.match{background:#ffeb70!important;color:#111!important;outline:2px solid #bf7100;font-weight:800}
         .doctor:focus-visible{outline:2px solid #bf7100}
-        .note{font-size:12px;color:#596579;margin:0 0 8px}
-        """, '</style><body><p class="note">名前にカーソルを合わせると同じ医師を強調します。スマートフォンでは名前をタップすると固定し、もう一度タップすると解除します。</p><div class="scroll"><table><colgroup><col style="width:12%"><col style="width:10%"><col span="6" style="width:13%"></colgroup><thead><tr>']
+        .note{font-size:16px;line-height:1.7;font-weight:500;color:#243247;margin:0 0 12px;overflow-wrap:anywhere}
+        """, '</style><body><p class="note">名前にカーソルを合わせると同じ医師を強調します。クリックするとカーソルを外しても強調表示が続き、同じ名前をもう一度クリックすると解除します。スマートフォンではタップで同じ操作ができます。</p><div class="scroll"><table><colgroup><col style="width:12%"><col style="width:10%"><col span="6" style="width:13%"></colgroup><thead><tr>']
     parts.extend('<th>'+html.escape(str(c))+'</th>' for c in df.columns)
     parts.append('</tr></thead><tbody>')
     for _, row in df.iterrows():
@@ -332,442 +248,245 @@ def build_hover_schedule_html(df, shift_columns, doctors, color_style):
     </script></body></html>""")
     return ''.join(parts)
 
-# 2か月モード：日付を実日付で扱い、同じCP-SATモデルで同時計算する。
-TWO_SHIFTS = ["A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"]
-TWO_NIGHTS = ["A宿直", "B宿直", "外来宿直"]
-TWO_DAYS = ["A日直", "B日直", "外来日直"]
+ALL_SHIFT_TYPES = ['A宿直', 'B宿直', '外来宿直', 'A日直', 'B日直', '外来日直']
+NUMERIC_DEFAULTS = {'希望優先度(数字が大きいほど優先)':1, '最低空ける日数':5, '月間最小回数':0, '月間最大回数':5, '休日最大回数':4, **{s+'上限':2 for s in ALL_SHIFT_TYPES}}
 
+def clean_text(value):
+    return '' if pd.isna(value) else str(value).strip()
 
-def two_month_pair(y, m):
-    return [(y, m), (y + (m == 12), 1 if m == 12 else m + 1)]
-
-
-def two_parse_items(text, y, m, kind):
-    result = []
-    if pd.isna(text) or not str(text).strip():
-        return result
-    text = str(text).translate(str.maketrans("０１２３４５６７８９，：", "0123456789,:"))
-    for token in text.split(","):
-        token = token.strip()
-        if not token:
+def checked_day_items(value, year, month, ng=False):
+    text = clean_text(value).translate(str.maketrans('０１２３４５６７８９，：', '0123456789,:'))
+    items = []
+    for token in text.split(','):
+        if not token.strip():
             continue
-        bits = token.split(":")
+        parts = token.strip().split(':')
+        if len(parts) > 2 or not re.fullmatch(r'\d+', parts[0].strip()):
+            raise ValueError(f'「{token}」：日付は整数、複数は半角カンマで入力してください。')
+        d = int(parts[0].strip())
+        if not 1 <= d <= calendar.monthrange(year, month)[1]:
+            raise ValueError(f'「{token}」：{year}年{month}月にない日付です。')
+        kind = parts[1].strip() if len(parts)==2 else ('全NG' if ng else None)
+        if kind not in (['全NG','日NG','宿NG','OK'] if ng else ALL_SHIFT_TYPES+[None]):
+            raise ValueError(f'「{token}」：枠名・NGの種類を確認してください。')
+        items.append((d,kind))
+    if ng:
+        by_day={}
+        for d,kind in items:
+            if d in by_day and by_day[d]!=kind:
+                raise ValueError(f'{d}日のNG指定が重複して異なっています。1種類にしてください。')
+            by_day[d]=kind
+    return list(dict.fromkeys(items))
+
+def validate_staff_inputs(df, year, month):
+    df = df.copy()
+    errors = []
+    if '先生の名前' not in df:
+        return df, ['医師条件CSVに「先生の名前」の列がありません。']
+    df['先生の名前'] = df['先生の名前'].map(clean_text)
+    blank = df['先生の名前'].eq('')
+    for i, row in df[blank].iterrows():
+        if any(clean_text(v) for k,v in row.items() if k!='先生の名前'):
+            errors.append(f'医師条件 {i+1}行目：条件が入力されていますが医師名が空欄です。')
+    df = df[~blank].reset_index(drop=True)
+    for name in df.loc[df['先生の名前'].duplicated(), '先生の名前'].unique():
+        errors.append(f'医師名「{name}」が重複しています。')
+    for col, default in NUMERIC_DEFAULTS.items():
+        if col not in df:
+            df[col] = default
+    for col in ['NG日(半角カンマ区切り)','希望日(半角カンマ区切り)','翌日PM duty']:
+        if col not in df:
+            df[col] = ''
+    for i,row in df.iterrows():
+        name = row['先生の名前']
+        if any(c in name for c in ',、') or name=='-' or '⚠️不足' in name:
+            errors.append(f'医師名「{name}」：カンマ・読点・不足表示・単独の「-」は使用できません。')
+        for col, default in NUMERIC_DEFAULTS.items():
+            raw = row[col]
+            try:
+                n = default if not clean_text(raw) else float(raw)
+                if not math.isfinite(n) or n<0 or n!=int(n) or n>1000000:
+                    raise ValueError()
+                df.at[i,col] = int(n)
+            except (TypeError,ValueError,OverflowError):
+                errors.append(f'{name}：{col}は0〜1000000の整数にしてください。')
         try:
-            if len(bits) > 2:
-                raise ValueError()
-            dt = datetime.date(y, m, int(bits[0]))
-        except (ValueError, TypeError):
-            raise ValueError(f"{y}年{m}月の{kind}「{token}」を確認してください。")
-        value = bits[1].strip() if len(bits) == 2 else ("全NG" if kind == "NG日" else None)
-        allowed = ["全NG", "日NG", "宿NG", "OK"] if kind == "NG日" else TWO_SHIFTS + [None]
-        if value not in allowed:
-            raise ValueError(f"{kind}「{token}」の枠名・種類を確認してください。")
-        result.append((dt, value))
-    return list(dict.fromkeys(result))
+            if float(df.at[i,'月間最小回数']) > float(df.at[i,'月間最大回数']):
+                errors.append(f'{name}：月間最小回数は月間最大回数以下にしてください。')
+        except (ValueError,TypeError):
+            pass
+        for col, ng in [('NG日(半角カンマ区切り)',True),('希望日(半角カンマ区切り)',False)]:
+            try:
+                items = checked_day_items(row[col],year,month,ng)
+                df.at[i,col] = ','.join(str(d) if kind is None or (ng and kind=='全NG') else f'{d}:{kind}' for d,kind in items)
+            except ValueError as e:
+                errors.append(f'{name}：{col.split("(")[0]} {e}')
+        weekdays = clean_text(row['翌日PM duty']).replace('，',',')
+        if any(w.strip() not in list('月火水木金土日') for w in weekdays.split(',') if w.strip()):
+            errors.append(f'{name}：翌日PM dutyは「水,木」のように曜日を入力してください。')
+    return df, errors
 
-
-def generate_two_months(month_inputs, fixed_df=None, phase_seconds=20):
-    """3段階の不足最小化後に希望・最低回数・休日負担を調整する。"""
-    keys = sorted(month_inputs)
-    start = datetime.date(*keys[0], 1)
-    last = datetime.date(*keys[-1], calendar.monthrange(*keys[-1])[1])
-    dates = [start + datetime.timedelta(days=i) for i in range((last - start).days + 1)]
-    monthly_dates = {k: [d for d in dates if (d.year, d.month) == k] for k in keys}
-    records, doctors = {}, []
-    for k, inp in month_inputs.items():
-        df = inp["staff"].copy()
-        if "先生の名前" not in df:
-            raise ValueError(f"{k}：先生の名前の列がありません。")
-        df["先生の名前"] = df["先生の名前"].fillna("").astype(str).str.strip()
-        df = df[df["先生の名前"] != ""]
-        if df["先生の名前"].duplicated().any():
-            raise ValueError(f"{k}：医師名が重複しています。")
-        for row in df.to_dict("records"):
-            name = row["先生の名前"]
-            records[(k, name)] = row
-            if name not in doctors:
-                doctors.append(name)
-    if not doctors:
-        raise ValueError("医師条件を入力してください。")
-
-    def integer(row, name, default):
-        value = row.get(name, default)
-        if pd.isna(value) or value == "":
-            return default
-        try:
-            number = float(value)
-            if not math.isfinite(number) or number < 0 or not number.is_integer():
-                raise ValueError()
-            return int(number)
-        except (ValueError, TypeError):
-            raise ValueError(f"{row['先生の名前']}：{name}は0以上の整数にしてください。")
-
-    def hol(dt):
-        return dt.weekday() >= 5 or jpholiday.is_holiday(dt) or dt.day in month_inputs.get((dt.year, dt.month), {}).get("holidays", [])
-
-    ng, requests, priorities, gaps = {}, {}, {}, {}
-    abs_specific = {name: set() for name in doctors}
-    abs_days = {name: set() for name in doctors}
-    external = {name: set() for name in doctors}
-    for (k, name), row in records.items():
-        ng[(k, name)] = dict(two_parse_items(row.get("NG日(半角カンマ区切り)", ""), *k, "NG日"))
-        requests[(k, name)] = two_parse_items(row.get("希望日(半角カンマ区切り)", ""), *k, "希望日")
-        priorities[(k, name)] = integer(row, "希望優先度(数字が大きいほど優先)", 1)
-        gaps[(k, name)] = integer(row, "最低空ける日数", 5)
-        if priorities[(k, name)] >= 100:
-            for dt, shift in requests[(k, name)]:
-                (abs_days[name] if shift is None else abs_specific[name]).add(dt if shift is None else (dt, shift))
-    if fixed_df is not None:
-        for row in fixed_df.to_dict("records"):
-            raw = row.get("日付", "")
-            if pd.isna(raw) or not str(raw).strip():
+def validate_fixed_inputs(df, doctors, year, month):
+    errors=[]
+    if df is None:
+        return None,errors
+    df=df.copy()
+    if '日付' not in df:
+        return df,['確定当直CSVに「日付」の列がありません。']
+    unknown = [c for c in df if c not in ['日付','平日/休日']+ALL_SHIFT_TYPES]
+    for c in unknown:
+        if df[c].map(clean_text).ne('').any():
+            errors.append(f'確定当直：未対応の列「{c}」に入力があります。枠名を確認してください。')
+    for i,row in df.iterrows():
+        raw=clean_text(row['日付'])
+        populated=any(clean_text(row.get(s,'')) not in ('','-') for s in ALL_SHIFT_TYPES)
+        if not raw and not populated:
+            continue
+        dt=parse_shift_date(raw,year,month)
+        if dt is None:
+            errors.append(f'確定当直 {i+1}行目：日付「{raw}」を確認してください。年付きの年月日で指定できます。')
+            continue
+        df.at[i,'日付']=dt.isoformat()
+        for s in ALL_SHIFT_TYPES:
+            val=clean_text(row.get(s,''))
+            if val in ('','-'):
                 continue
-            dt = parse_shift_date(raw, *keys[0])
-            if dt is None:
-                raise ValueError(f"確定当直の日付「{raw}」を確認してください。")
-            for shift in TWO_SHIFTS:
-                raw_names = row.get(shift, "")
-                if pd.isna(raw_names) or str(raw_names).strip() in ("", "-"):
-                    continue
-                for name in re.split(r"[、,]+", str(raw_names)):
-                    name = name.strip()
-                    if name not in doctors:
-                        raise ValueError(f"確定当直：医師「{name}」が名簿にありません。")
-                    if start <= dt <= last:
-                        if ((dt.year, dt.month), name) not in records:
-                            raise ValueError(f"{dt}：{name}の月別医師条件がありません。")
-                        abs_specific[name].add((dt, shift))
-                    else:
-                        external[name].add(dt)
-    abs_all = {n: abs_days[n] | {d for d, s in abs_specific[n]} for n in doctors}
-    active = {}
-    for dt in dates:
-        active[dt] = [s for s in TWO_SHIFTS if s in TWO_NIGHTS or hol(dt)
-                      or any((dt, s) in abs_specific[n] for n in doctors)]
-    model = cp_model.CpModel()
-    x, missing, excess = {}, {}, {}
-    soft = []
-    holiday_totals = []
-    for dt in dates:
-        k = (dt.year, dt.month)
-        for name in doctors:
-            for shift in active[dt]:
-                x[dt, name, shift] = model.NewBoolVar(f"{dt}_{name}_{shift}")
-                if (k, name) not in records:
-                    model.Add(x[dt, name, shift] == 0)
-        for shift in active[dt]:
-            need = month_inputs[k]["multi"].get((dt.day, shift), 1)
-            fixed_count = sum((dt, shift) in abs_specific[n] for n in doctors)
-            demand = max(need, fixed_count)
-            missing[dt, shift] = model.NewIntVar(0, demand, f"missing_{dt}_{shift}")
-            excess[dt, shift] = model.NewIntVar(0, len(doctors), f"excess_{dt}_{shift}")
-            model.Add(sum(x[dt, n, shift] for n in doctors) + missing[dt, shift] == demand + excess[dt, shift])
-            soft.append(excess[dt, shift] * 50000)
-        for name in doctors:
-            daily = [x[dt, name, s] for s in active[dt]]
-            fixed_count = sum(d == dt for d, s in abs_specific[name])
-            model.Add(sum(daily) <= max(1, fixed_count))
-            if (k, name) not in records:
-                continue
-            row = records[k, name]
-            if dt not in abs_all[name]:
-                ngtype = ng[k, name].get(dt, "OK")
-                for shift in active[dt]:
-                    if ngtype == "全NG" or (ngtype == "日NG" and shift in TWO_DAYS) or (ngtype == "宿NG" and shift in TWO_NIGHTS):
-                        model.Add(x[dt, name, shift] == 0)
-                if "月火水木金土日"[dt.weekday()] in str(row.get("翌日PM duty", "")) and not hol(dt + datetime.timedelta(days=1)):
-                    for shift in TWO_NIGHTS:
-                        model.Add(x[dt, name, shift] == 0)
-            if dt in abs_days[name] and not fixed_count:
-                model.Add(sum(daily) == 1)
-            for shift in active[dt]:
-                if (dt, shift) in abs_specific[name]:
-                    model.Add(x[dt, name, shift] == 1)
+            names=list(dict.fromkeys(n.strip() for n in re.split('[、,]',val)))
+            for name in names:
+                if name not in doctors:
+                    errors.append(f'確定当直 {dt} {s}：医師名「{name}」が名簿と一致しません。')
+            df.at[i,s]='、'.join(names)
+    return df,errors
 
-    for k in keys:
-        for name in doctors:
-            if (k, name) not in records:
-                continue
-            row = records[k, name]
-            md = monthly_dates[k]
-            forced = [(d, s) for d, s in abs_specific[name] if d in md]
-            generic = [d for d in abs_days[name] if d in md and not any(fd == d for fd, s in forced)]
-            all_work = [x[d, name, s] for d in md for s in active[d]]
-            max_total = max(integer(row, "月間最大回数", 5), len(forced) + len(generic))
-            model.Add(sum(all_work) <= max_total)
-            min_total = min(integer(row, "月間最小回数", 0), max_total)
-            short = model.NewIntVar(0, min_total, f"short_{k}_{name}")
-            model.Add(sum(all_work) + short >= min_total)
-            soft.append(short * 10000)
-            for shift in TWO_SHIFTS:
-                cap = max(integer(row, shift + "上限", 2), sum(s == shift for d, s in forced) + len(generic))
-                model.Add(sum(x[d, name, shift] for d in md if shift in active[d]) <= cap)
-            hol_work = sum(x[d, name, s] for d in md if hol(d) for s in active[d])
-            hol_cap = max(integer(row, "休日最大回数", 4), sum(hol(d) for d, s in forced) + sum(hol(d) for d in generic))
-            model.Add(hol_work <= hol_cap)
-            holiday_totals.append(hol_work)
-            if priorities[k, name] < 100:
-                for d, shift in requests[k, name]:
-                    variables = [x[d, name, s] for s in active[d] if shift is None or s == shift]
-                    soft.extend(-v * priorities[k, name] * 100 for v in variables)
-
-    # 両月の設定が異なる場合は、前後双方の最低間隔を満たす。
-    for name in doctors:
-        working = {}
-        for d in dates:
-            if d in abs_all[name]:
-                continue  # 確定・絶対希望の既存の例外を維持
-            b = model.NewBoolVar(f"work_{name}_{d}")
-            model.AddMaxEquality(b, [x[d, name, s] for s in active[d]])
-            working[d] = b
-        ordered = list(working)
-        for i, d in enumerate(ordered):
-            gap = gaps.get(((d.year, d.month), name), 0)
-            for other in ordered[i + 1:]:
-                other_gap = gaps.get(((other.year, other.month), name), 0)
-                if (other - d).days <= max(gap, other_gap):
-                    model.Add(working[d] + working[other] <= 1)
-            if any(abs((d - ext).days) <= gap for ext in external[name]):
-                model.Add(working[d] == 0)
-    max_holidays = model.NewIntVar(0, len(dates) * 6, "max_holidays")
-    for count in holiday_totals:
-        model.Add(count <= max_holidays)
-    soft.append(max_holidays * 1000)
-    groups = [
-        sum(v for (d, s), v in missing.items() if s in ("A宿直", "B宿直", "A日直", "B日直")),
-        sum(v for (d, s), v in missing.items() if s == "外来宿直"),
-        sum(v for (d, s), v in missing.items() if s == "外来日直"),
-        sum(soft),
-    ]
-    snapshot, missing_values, excess_values = None, None, None
-    complete_optimization = True
-    for objective in groups:
-        model.Minimize(objective)
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = phase_seconds
-        status = solver.Solve(model)
-        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-            complete_optimization = False
-            break
-        snapshot = {key: solver.Value(v) for key, v in x.items()}
-        missing_values = {key: solver.Value(v) for key, v in missing.items()}
-        excess_values = {key: solver.Value(v) for key, v in excess.items()}
-        if status != cp_model.OPTIMAL:
-            complete_optimization = False
-            break
-        model.Add(objective == int(solver.Value(objective)))
-    if snapshot is None:
-        return None, None, ["条件が矛盾しているか、時間内に当直案を見つけられませんでした。"], {}
-    rows, summaries = [], []
-    for dt in dates:
-        row = {"日付": f"{dt.year}/{dt.month}/{dt.day}({'月火水木金土日'[dt.weekday()]})", "平日/休日": "休日" if hol(dt) else "平日"}
-        for shift in TWO_SHIFTS:
-            assigned = [n for n in doctors if snapshot.get((dt, n, shift), 0)]
-            count = missing_values.get((dt, shift), 0)
-            if count:
-                assigned.append(f"⚠️不足({count}名)")
-            row[shift] = "、".join(assigned) if assigned else "-"
-        rows.append(row)
-    warnings = []
-    if not complete_optimization:
-        warnings.append("計算時間内に得られた案です。優先順位に沿う最適化が完了したことまでは確認できていません。")
-    for k in keys:
-        for name in doctors:
-            if (k, name) not in records:
-                continue
-            row = {"対象月": f"{k[0]}年{k[1]}月", "先生の名前": name}
-            for shift in TWO_SHIFTS:
-                row[shift] = sum(snapshot.get((d, name, shift), 0) for d in monthly_dates[k])
-            row["総合計"] = sum(row[s] for s in TWO_SHIFTS)
-            row["休日回数"] = sum(snapshot.get((d, name, s), 0) for d in monthly_dates[k] if hol(d) for s in TWO_SHIFTS)
-            reqs = requests[k, name]
-            granted = sum(any(snapshot.get((d, name, s), 0) for s in active[d] if shift is None or s == shift) for d, shift in reqs)
-            row["希望日達成"] = f"{granted}/{len(reqs)}" if reqs else "-"
-            # 当月に関係する隣接勤務の間隔。月境界の前後も含める。
-            worked = sorted(set(d for d in dates if any(snapshot.get((d, name, s), 0) for s in active[d])) | external[name])
-            intervals = [(b - a).days - 1 for a, b in zip(worked, worked[1:]) if a in monthly_dates[k] or b in monthly_dates[k]]
-            row["最小間隔"] = min(intervals) if intervals else None
-            summaries.append(row)
-            if row["総合計"] < integer(records[k, name], "月間最小回数", 0):
-                warnings.append(f"{row['対象月']} {name}：月間最小回数に届いていません。")
-    if any(excess_values.values()):
-        warnings.append("絶対希望等に対応するため、設定人数を超えた枠があります。")
-    totals = {s: sum(v for (d, shift), v in missing_values.items() if shift == s) for s in TWO_SHIFTS}
-    return pd.DataFrame(rows), pd.DataFrame(summaries), warnings, totals
-
-
-def render_two_month_app(template):
+def input_signature(year, month, staff, holidays, multi, fixed, next_month_day1_special=False):
     import hashlib
     import json
-    st.caption("開始月から連続2か月を同時に計算します。回数条件は月別、勤務間隔は月をまたいで適用します。")
-    today = datetime.date.today()
-    nxt = (today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
-    cy, cm = st.columns(2)
-    y = int(cy.number_input("開始年", 2000, 2100, nxt.year, key="two_year"))
-    m = int(cm.number_input("開始月", 1, 12, nxt.month, key="two_month"))
-    pairs = two_month_pair(y, m)
-    st.info(f"{pairs[0][0]}年{pairs[0][1]}月 ＋ {pairs[1][0]}年{pairs[1][1]}月を作成します。両月の入力を終えてから下の作成ボタンを押してください。")
-    st.caption("医師条件CSVは月ごとに保存・読み込みできます。確定当直は日付を年付き（例：2027/1/1）で指定してください。")
-    st.download_button("医師条件のひな形", pd.DataFrame(template).to_csv(index=False).encode("utf-8-sig"),
-                       "医師条件_ひな形.csv", "text/csv", key="two_template")
-    all_inputs = {}
-    tabs = st.tabs([f"{yy}年{mm}月の入力" for yy, mm in pairs])
-    for tab, (yy, mm) in zip(tabs, pairs):
-        with tab:
-            mk = f"{yy}_{mm}"
-            nd = calendar.monthrange(yy, mm)[1]
-            upload = st.file_uploader("この月の医師条件CSV", type="csv", key=f"two_staff_{mk}")
-            base = parse_staff_csv(upload.getvalue()).fillna("") if upload else pd.DataFrame(template).copy().fillna("")
-            if "先生の名前" not in base:
-                st.error("先生の名前の列が必要です。")
-                st.stop()
-            if upload:
-                digest = hashlib.sha256(upload.getvalue()).hexdigest()
-                if st.session_state.get("two_uploaded_" + mk) != digest:
-                    for oldkey in list(st.session_state):
-                        if oldkey.startswith("two_ng_" + mk + "_"):
-                            del st.session_state[oldkey]
-                    st.session_state["two_uploaded_" + mk] = digest
-            staff = st.data_editor(base, num_rows="dynamic", hide_index=True, use_container_width=True,
-                                   column_config={"NG日(半角カンマ区切り)": None}, key=f"two_editor_{mk}")
-            staff = staff.copy()
-            staff["先生の名前"] = staff["先生の名前"].fillna("").astype(str).str.strip()
-            staff = staff[staff["先生の名前"] != ""].reset_index(drop=True)
-            if staff["先生の名前"].duplicated().any():
-                st.error("医師名が重複しています。")
-                st.stop()
-            hols = st.multiselect("特別休日（平日でも日直を設ける日）",
-                                  [d for d in range(1, nd + 1) if datetime.date(yy, mm, d).weekday() < 5 and not jpholiday.is_holiday(datetime.date(yy, mm, d))],
-                                  key=f"two_hol_{mk}")
-            st.caption("土日祝は自動で休日扱いです。回数・上限・最低間隔・希望日はこの月の表で設定します。")
-            with st.expander("増員する枠"):
-                multi_df = st.data_editor(pd.DataFrame(columns=["日付", "当直枠", "人数"]), num_rows="dynamic", hide_index=True,
-                    column_config={"日付": st.column_config.NumberColumn(min_value=1, max_value=nd, step=1),
-                                   "当直枠": st.column_config.SelectboxColumn(options=TWO_SHIFTS),
-                                   "人数": st.column_config.NumberColumn(min_value=2, max_value=10, step=1)}, key=f"two_multi_{mk}")
-            multi = {}
-            for row in multi_df.to_dict("records"):
-                if pd.notna(row["日付"]) and pd.notna(row["人数"]) and row["当直枠"] in TWO_SHIFTS:
-                    d = int(row["日付"])
-                    dt = datetime.date(yy, mm, d)
-                    if row["当直枠"] in TWO_DAYS and not (dt.weekday() >= 5 or jpholiday.is_holiday(dt) or d in hols):
-                        st.error(f"{d}日の日直を増員するには、特別休日にも指定してください。")
-                        st.stop()
-                    multi[d, row["当直枠"]] = int(row["人数"])
-            layout = st.radio("NGカレンダーの表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key=f"two_layout_{mk}")
-            st.caption("表示・月の切り替えやCSV保存の前に、各医師の「NG日を保存する」を押してください。")
-            if len(staff):
-                dtabs = st.tabs(staff["先生の名前"].tolist())
-                for i, dtab in enumerate(dtabs):
-                    with dtab:
-                        name = staff.loc[i, "先生の名前"]
-                        statekey = f"two_ng_{mk}_{name}"
-                        if statekey not in st.session_state:
-                            try:
-                                st.session_state[statekey] = {d.day: v for d, v in two_parse_items(staff.loc[i].get("NG日(半角カンマ区切り)", ""), yy, mm, "NG日")}
-                            except ValueError as e:
-                                st.error(str(e))
-                                st.stop()
-                        saved = dict(st.session_state[statekey])
-                        st.session_state[statekey] = saved
-                        days = []
-                        for d in range(1, nd + 1):
-                            dt = datetime.date(yy, mm, d)
-                            hol = dt.weekday() >= 5 or jpholiday.is_holiday(dt) or d in hols
-                            opts = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
-                            value = saved.get(d, "OK")
-                            if value not in opts:
-                                value = "宿NG" if value == "全NG" else "OK"
-                            saved[d] = value
-                            days.append(dict(day=d, weekday="月火水木金土日"[dt.weekday()], options=opts, value=value,
-                                warning="月火水木金土日"[dt.weekday()] in str(staff.loc[i].get("翌日PM duty", "")),
-                                kind="saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in hols else ("holiday" if hol else "weekday")))
-                        revision = hashlib.sha256(json.dumps([yy, mm, name, layout, days], ensure_ascii=False).encode()).hexdigest()
-                        ck = f"two_calendar_{mk}_{name}_{layout}"
-                        st.markdown("<div style='color:#bf5700;background:#fff0c2;padding:8px'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。ただし、翌日が休日の場合は宿直に入ることがあります。</div>", unsafe_allow_html=True)
-                        response = horizontal_ng_component(HORIZONTAL_NG_HTML)(days=days, mode="month" if layout == "月間カレンダー" else "row",
-                            offset=datetime.date(yy, mm, 1).weekday(), doctor=name, version=revision, key=ck, default=None)
-                        if isinstance(response, dict) and response.get("token") != st.session_state.get(ck + "_seen"):
-                            st.session_state[ck + "_seen"] = response.get("token")
-                            values = response.get("values")
-                            if response.get("version") == revision and isinstance(values, list) and len(values) == nd and all(v in d["options"] for v, d in zip(values, days)):
-                                st.session_state[statekey] = dict(enumerate(values, 1))
-                                st.rerun()
-                        st.session_state[statekey] = saved
-                        staff.at[i, "NG日(半角カンマ区切り)"] = ",".join(str(d) if v == "全NG" else f"{d}:{v}" for d, v in sorted(saved.items()) if v != "OK")
-            st.download_button("この月の医師条件をCSVで保存", staff.to_csv(index=False).encode("utf-8-sig"),
-                               f"医師条件_{yy}年{mm}月.csv", "text/csv", key=f"two_download_{mk}")
-            all_inputs[yy, mm] = dict(staff=staff, holidays=hols, multi=multi)
-    st.subheader("確定当直・期間外の勤務（任意）")
-    fixed_columns = ["日付", "平日/休日"] + TWO_SHIFTS
-    fixed_upload = st.file_uploader("確定当直CSV", type="csv", key="two_fixed_upload")
-    fixed_base = parse_fixed_csv(fixed_upload.getvalue()).fillna("") if fixed_upload else pd.DataFrame(columns=fixed_columns)
-    fixed = st.data_editor(fixed_base, num_rows="dynamic", hide_index=True, key="two_fixed_editor")
-    signature = hashlib.sha256(repr([(k, v["staff"].to_csv(index=False), v["holidays"], v["multi"]) for k, v in all_inputs.items()]).encode() + fixed.to_csv(index=False).encode()).hexdigest()
-    st.caption("不足時はA宿直・B宿直・A日直・B日直を同順位で優先し、次に外来宿直、最後に外来日直を埋めます。確定勤務・優先度100以上にはNGや上限・間隔の例外があります。")
-    if st.button("2か月まとめて当直案を作成する", type="primary"):
-        try:
-            with st.spinner("2か月を同時計算しています（計算は最大約80秒）"):
-                result, summary, warnings, shortages = generate_two_months(all_inputs, fixed)
-            st.session_state["two_result"] = dict(result=result, summary=summary, warnings=warnings, shortages=shortages,
-                                                  signature=signature, pairs=pairs)
-        except Exception as e:
-            st.session_state.pop("two_result", None)
-            st.error(str(e))
-    data = st.session_state.get("two_result")
-    if data and data["pairs"] == pairs:
-        if data["signature"] != signature:
-            st.warning("入力条件が変更されています。表示中の当直案は前回の条件で作成したものです。")
-        for warning in data["warnings"]:
-            st.warning(warning)
-        result = data["result"]
-        if result is not None:
-            if sum(data["shortages"].values()):
-                st.warning("不足を含む当直案です：" + "、".join(f"{s} {v}名分" for s, v in data["shortages"].items() if v))
-            else:
-                st.success("2か月分の必要人数を満たす当直案を作成しました。")
-            st.subheader("作成した当直案")
-            view = st.radio("表示期間", ["2か月まとめて"] + [f"{yy}年{mm}月" for yy, mm in pairs], horizontal=True)
-            frames = {f"{yy}年{mm}月": result[result["日付"].str.startswith(f"{yy}/{mm}/")] for yy, mm in pairs}
-            show = result if view == "2か月まとめて" else frames[view]
-            doctors = list(dict.fromkeys(n for v in all_inputs.values() for n in v["staff"]["先生の名前"]))
-            marked = st.multiselect("色別ハイライト（黄色）", doctors, key="two_highlight")
-            def color(value):
-                if "⚠️不足" in value:
-                    return "background:#ffe6e6;color:#cc0000;font-weight:bold;"
-                if any(n.strip() in marked for n in re.split("[、,]", value)):
-                    return "background:#fff200;color:#000;"
-                return ""
-            horizontal_ng_component(build_hover_schedule_html(show, TWO_SHIFTS, doctors, color))(key="two_hover_table", default=None)
-            label = f"{pairs[0][0]}年{pairs[0][1]}月_{pairs[1][0]}年{pairs[1][1]}月"
-            st.download_button("2か月分の当直案をCSVでダウンロード", result.to_csv(index=False).encode("utf-8-sig"),
-                               f"当直案_{label}.csv", "text/csv")
-            for label, frame in frames.items():
-                st.download_button(f"{label}の当直案をCSVでダウンロード", frame.to_csv(index=False).encode("utf-8-sig"),
-                                   f"当直案_{label}.csv", "text/csv", key="two_export_" + label)
-            st.subheader("月別の担当回数・希望日・勤務間隔")
-            st.dataframe(data["summary"], hide_index=True, use_container_width=True)
+    payload=[year,month,staff.to_csv(index=False),sorted(holidays), sorted((d,s,c) for (d,s),c in multi.items()),fixed.to_csv(index=False), bool(next_month_day1_special)]
+    return hashlib.sha256(json.dumps(payload,ensure_ascii=False).encode()).hexdigest()
+
+
+def audit_schedule(result, staff, year, month, holidays, multi, past, future, next_month_day1_special=False):
+    warnings=[]
+    for _,row in staff.iterrows():
+        name=row['先生の名前']
+        worked=[]; counts=dict.fromkeys(ALL_SHIFT_TYPES,0); hol_count=0
+        for i,r in result.iterrows():
+            d=parse_shift_date(r['日付'],year,month)
+            for s in ALL_SHIFT_TYPES:
+                if name in [n.strip() for n in re.split('[、,]',str(r[s]))]:
+                    worked.append(d);counts[s]+=1
+                    hol_count+=int(r['平日/休日']=='休日')
+        ng = dict(checked_day_items(row.get('NG日(半角カンマ区切り)', ''), year, month, True))
+        for _, r in result.iterrows():
+            dt = parse_shift_date(r['日付'], year, month)
+            next_holiday = next_day_is_holiday(dt, year, month, holidays, next_month_day1_special)
+            for slot in ALL_SHIFT_TYPES:
+                if name not in [n.strip() for n in re.split('[、,]', str(r[slot]))]: continue
+                kind = ng.get(dt.day, 'OK')
+                night = slot in ['A宿直','B宿直','外来宿直']
+                if kind=='全NG' or (kind=='宿NG' and night) or (kind=='日NG' and not night):
+                    warnings.append(f'{name}：{dt} {slot}はNG指定より確定指定を優先しました。')
+                if night and '月火水木金土日'[dt.weekday()] in clean_text(row.get('翌日PM duty','')) and not next_holiday:
+                    warnings.append(f'{name}：{dt} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
+        total=sum(counts.values())
+        if total < int(row['月間最小回数']):
+            warnings.append(f'{name}：月間最小回数の目標{int(row["月間最小回数"])}回に対し、{total}回です。')
+        for label,value,cap in [('月間最大回数',total,int(row['月間最大回数'])),('休日最大回数',hol_count,int(row['休日最大回数']))]+[(s+'上限',counts[s],int(row[s+'上限'])) for s in ALL_SHIFT_TYPES]:
+            if value>cap:
+                warnings.append(f'{name}：確定指定に伴い{label}を超えています（設定{cap}回／結果{value}回）。')
+        dates=sorted(set(worked)|set((past or {}).get(name,[]))|set((future or {}).get(name,[])))
+        for a,b in zip(dates,dates[1:]):
+            if (a.year,a.month)!=(year,month) and (b.year,b.month)!=(year,month):continue
+            gap=(b-a).days-1
+            if gap<int(row['最低空ける日数']):
+                warnings.append(f'{name}：確定勤務同士の間隔が設定未満です（{a}→{b}、空き{gap}日／設定{int(row["最低空ける日数"])}日）。確定勤務を維持しました。')
+    for _,r in result.iterrows():
+        d=parse_shift_date(r['日付'],year,month).day
+        for s in ALL_SHIFT_TYPES:
+            names=[n.strip() for n in re.split('[、,]',str(r[s])) if n.strip() not in ('','-') and '⚠️不足' not in n]
+            need=multi.get((d,s),1)
+            if len(names)>need:
+                warnings.append(f'{month}/{d} {s}：設定{need}名に対して{len(names)}名を配置しています。')
+    return warnings
+
+
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_day1_special=False):
+    staff_df,errors=validate_staff_inputs(staff_df,target_year,target_month)
+    fixed_df,fixed_errors=validate_fixed_inputs(fixed_df,staff_df.get('先生の名前',pd.Series(dtype=str)).tolist(),target_year,target_month)
+    errors+=fixed_errors
+    if staff_df.empty:errors.append('医師を1名以上入力してください。')
+    for (d,s),count in multi_slots_dict.items():
+        if not isinstance(d,int) or not 1<=d<=calendar.monthrange(target_year,target_month)[1] or s not in ALL_SHIFT_TYPES or not isinstance(count,int) or not 2<=count<=10:
+            errors.append(f'増員設定「{d}日 {s} {count}名」を確認してください。')
+        elif s in ['A日直','B日直','外来日直']:
+            dt=datetime.date(target_year,target_month,d)
+            if not(dt.weekday()>=5 or jpholiday.is_holiday(dt) or d in custom_holidays):
+                errors.append(f'{d}日の日直増員：先に特別休日を指定してください。')
+    if errors:return None,False,errors,None,None
+    result,success,warnings,past,future=_generate_shift_core(target_year,target_month,staff_df,custom_holidays,multi_slots_dict,fixed_df,next_month_day1_special)
+    if result is not None:
+        warnings+=audit_schedule(result,staff_df,target_year,target_month,custom_holidays,multi_slots_dict,past,future,next_month_day1_special)
+        success=not any('⚠️不足' in str(v) for s in ALL_SHIFT_TYPES for v in result[s])
+    return result,success,list(dict.fromkeys(warnings)),past,future
+
+
+
+def show_input_errors(messages):
+    messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
+    st.error(f"入力内容を確認してください（{len(messages)}件）")
+    st.dataframe(pd.DataFrame({"修正が必要な項目": messages}), hide_index=True, use_container_width=True)
+
+
+def show_schedule_notice(result, messages):
+    messages = list(dict.fromkeys(str(m).strip() for m in messages if str(m).strip()))
+    shortage_rows = []
+    if result is not None:
+        for _, row in result.iterrows():
+            for slot in ALL_SHIFT_TYPES:
+                match = re.search(r'⚠️不足\((\d+)名\)', str(row.get(slot, '')))
+                if match:
+                    shortage_rows.append(int(match.group(1)))
+    # 最重要の結果を、説明より先に表示する。
+    if result is None:
+        st.error("当直案を作成できませんでした。")
+    elif shortage_rows:
+        st.warning(f"不足が残っています：{len(shortage_rows)}枠、合計{sum(shortage_rows)}名分")
+    else:
+        st.success("必要人数を満たす当直案ができました。")
+
+    details = []
+    for message in messages:
+        if message.startswith(('🚨 **以下の枠', '📊 **【不足している枠')):
+            continue
+        if re.fullmatch(r'・\d+/\d+ の「.+」', message) or re.fullmatch(r'・.+： 計 \d+ 枠不足', message):
+            continue
+        details.append(message)
+    if details or result is None or shortage_rows:
+        with st.container(border=True):
+            st.markdown("**計算状況・条件の注意事項と対処方法**")
+            for message in details:
+                st.markdown(message)
+            if result is None or shortage_rows:
+                st.markdown("**条件を見直す場合**")
+                st.write("入力内容を確認し、実際に調整できる範囲で、月間・休日・枠別の上限や勤務間隔を見直して再作成してください。")
+            if shortage_rows:
+                st.write("不足箇所は当直案の「⚠️不足」で確認できます。手動調整する場合はCSVをダウンロードし、Excelなどで編集してください。")
 
 
 # ページ設定
 st.set_page_config(page_title="当直作成アプリ", layout="wide")
 st.title("当直作成アプリ")
-creation_mode = st.radio("作成期間", ["1か月", "2か月"], horizontal=True, key="creation_mode")
-if creation_mode == "2か月":
-    render_two_month_app({'先生の名前': ['Dr. A', 'Dr. B', 'Dr. C', 'Dr. D', 'Dr. E'], '翌日PM duty': ['水,木', '', '土,日', '', ''], 'NG日(半角カンマ区切り)': ['', '15:日NG', '10:宿NG', '', ''], '希望日(半角カンマ区切り)': ['10:A宿直, 15:B日直', '', '8', '20', ''], '希望優先度(数字が大きいほど優先)': [100, 1, 1, 1, 1], '最低空ける日数': [5, 4, 6, 5, 3], '月間最小回数': [1, 2, 0, 1, 0], '月間最大回数': [5, 6, 4, 5, 7], '休日最大回数': [2, 2, 2, 2, 2], 'A宿直上限': [2, 2, 2, 2, 2], 'B宿直上限': [2, 2, 2, 2, 2], '外来宿直上限': [2, 2, 2, 2, 2], 'A日直上限': [2, 2, 2, 2, 2], 'B日直上限': [2, 2, 2, 2, 2], '外来日直上限': [2, 2, 2, 2, 2], '備考（メモ・説明など自由記入）': ['学会のため休み多め', '15日は午後休', '', '当直明け休み希望', '']})
-    st.stop()
-
 st.caption("年月・勤務条件・NG日を入力して、当直表の案を作成します。")
 with st.expander("初めて使う方へ：入力からダウンロードまで", expanded=False):
     st.markdown("""
 1. **年月・休日・必要人数を設定**します。
-2. 必要に応じて、**先月末の勤務や今月の確定済み当直**を入力します。
+2. 必要に応じて、**先月・今月・来月の確定当直**を入力します。
 3. **医師ごとの回数・勤務間隔・希望日**を入力します。
 4. 各医師のカレンダーで**NG日を選び、最後に「NG日を保存する」を押します。**
 5. **「当直案を作成する」**を押し、結果を確認してCSVをダウンロードします。
 
 途中で終了する場合は、下の「医師条件をCSVで保存」をご利用ください。
-特別休日・増員設定・確定済み当直は、そのCSVには含まれません。
+特別休日・翌月1日の指定・増員設定・確定済み当直は、そのCSVには含まれません。
     """)
 
 
@@ -975,6 +694,8 @@ div[data-testid="stForm"]:has([data-ng-state]) [data-testid="stVerticalBlock"] {
 # ==========================================
 # 1. 上部ダッシュボード：年月と休日の設定
 # ==========================================
+st.markdown('\n<style>\n/* 本文の見出しだけに適用。カレンダーや結果表の部品には影響しない。 */\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1,\n.main [data-testid="stHeadingWithActionElements"] h1 {\n    font-size: 1.9rem !important;\n    line-height: 1.4 !important;\n    font-weight: 750 !important;\n    padding: 0 0 .6rem !important;\n}\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2,\n.main [data-testid="stHeadingWithActionElements"] h2 {\n    font-size: 1.3rem !important;\n    line-height: 1.5 !important;\n    font-weight: 700 !important;\n    background: var(--secondary-background-color, #f0f3f7);\n    border-left: 5px solid #47749b;\n    border-radius: 0 8px 8px 0;\n    padding: .85rem 1rem !important;\n    margin: .4rem 0 .35rem !important;\n}\n[data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3,\n.main [data-testid="stHeadingWithActionElements"] h3 {\n    font-size: 1.08rem !important;\n    line-height: 1.55 !important;\n    font-weight: 700 !important;\n    padding: .45rem 0 .6rem !important;\n    border-bottom: 1px solid rgba(128, 144, 160, .3);\n    margin: .2rem 0 .15rem !important;\n}\n[data-testid="stMain"] [data-testid="stMarkdownContainer"] hr,\n.main [data-testid="stMarkdownContainer"] hr {\n    margin: 1.4rem 0 !important;\n    border: 0;\n    border-top: 1px solid rgba(128, 144, 160, .35);\n}\n[data-testid="stMetricLabel"] p {font-size: .9rem !important; line-height: 1.5 !important;}\n[data-testid="stMetricValue"] {font-size: 1.8rem !important; line-height: 1.25 !important;}\n@media (max-width:600px) {\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h1 {font-size:1.6rem !important;}\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h2 {font-size:1.15rem !important; padding:.7rem .75rem !important;}\n    [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] h3 {font-size:1rem !important;}\n}\n</style>\n', unsafe_allow_html=True)
+
 st.header("📅 年月・休日・必要人数の設定")
 st.info("作成する年月を選んでください。土日祝日は自動で休日扱いになります。平日にも日直を設けたい場合は、その日の「休日にする」にチェックを入れます。")
 
@@ -1082,6 +803,29 @@ with st.container(key="special_holiday_calendar"):
                         ):
                             custom_holidays.append(day)
 
+next_month_day1 = datetime.date(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
+month_last = datetime.date(year, month, calendar.monthrange(year, month)[1])
+next_month_day1_is_off = next_month_day1.weekday() >= 5 or jpholiday.is_holiday(next_month_day1)
+next_month_day1_special = False
+if next_month_day1_is_off:
+    st.caption(
+        f"{next_month_day1.month}月1日（{weekdays_ja[next_month_day1.weekday()]}）は土日祝です。"
+        f"{month_last.month}月{month_last.day}日の宿直は、翌日PM dutyがあっても入れます。追加の指定は不要です。"
+    )
+else:
+    st.caption("月末の宿直だけは、翌日が翌月1日です。翌月1日を特別休日にしたい場合は、ここで指定します。当月の日直枠は増えません。")
+    next_month_day1_special = st.checkbox(
+        f"{next_month_day1.month}月1日（{weekdays_ja[next_month_day1.weekday()]}）を特別休日として扱う",
+        key=f"hol_next_{next_month_day1.year}_{next_month_day1.month}_1",
+        help="当月の日直枠は増えません。チェックすると、月末の宿直だけ翌日PM dutyの制限を外します。",
+    )
+    st.caption(
+        f"チェックすると、{month_last.month}月{month_last.day}日の宿直は翌日が特別休日になり、翌日PM dutyがあっても入れます。"
+        "翌月の日直はこの画面では作りません。翌月の当直を作るとき、その月のカレンダーで改めて指定してください。"
+    )
+
+holiday_total_placeholder = st.empty()
+
 st.divider()
 
 st.subheader("👥 1つの枠を2名以上にする設定（任意）")
@@ -1123,8 +867,6 @@ for _, row in edited_multi_df.iterrows():
         except (ValueError, TypeError):
             pass
 
-st.divider()
-
 # ==========================================
 # 2. 枠数とカレンダー表示（計算・集計）
 # ==========================================
@@ -1142,16 +884,7 @@ for d in range(1, num_days + 1):
             shift_counts[s] += multi_slots_dict.get((d, s), 1)
 
 total_slots = sum(shift_counts.values())
-
-st.subheader(f"📌 {year}年{month}月の必要当直枠数")
-
-st.metric("🌙 A宿直", f"{shift_counts['A宿直']} 枠")
-st.metric("☀️ A日直", f"{shift_counts['A日直']} 枠")
-st.metric("🌙 B宿直", f"{shift_counts['B宿直']} 枠")
-st.metric("☀️ B日直", f"{shift_counts['B日直']} 枠")
-st.metric("☀️ 外来日直", f"{shift_counts['外来日直']} 枠")
-st.metric("🌙 外来宿直", f"{shift_counts['外来宿直']} 枠")
-st.metric("🏥 月間 総当直数", f"{total_slots} 枠")
+holiday_total_placeholder.metric("🏥 必要な総当直枠数", f"{total_slots} 枠")
 
 st.divider()
 
@@ -1159,16 +892,18 @@ st.divider()
 # 3. メイン画面：データの読み込み＆画面入力
 # ==========================================
 
-st.header("1. 先月末・今月の確定済み当直を入力（任意）")
-st.info("先月末の勤務は、月初の勤務間隔を確認するために使います。今月すでに担当者が決まっている枠も、ここに入力してください。入力がなければ、この項目は飛ばせます。")
+st.header("1. 先月今月来月の確定当直を入力（任意）")
+st.info("先月・今月・来月の、担当者が決まっている当直を入力してください。先月末の勤務は、月初の勤務間隔の確認に使います。入力がなければ、この項目は飛ばせます。")
 with st.expander("確定済み当直の入力例と扱い", expanded=False):
     st.markdown("""
 - CSVのアップロードと、下の表への直接入力のどちらでも入力できます。
 - 日付は `2026/10/1` または `10/1` の形式で入力します。
 - 担当する枠の欄に、医師条件と同じ名前を入力します。複数人の場合は `佐藤、鈴木` のように「、」で区切ります。
-- 現在の読み込みでは空白も区切りとして扱われるため、名前は空白を含めず、医師条件側も同じ表記にそろえてください。
+- 医師名の区切りには「、」を使ってください。名前に含まれる空白は区切りません。医師条件と同じ表記にしてください。
 - 未確定の枠は空欄で構いません。「平日/休日」欄ではなく、上部のカレンダー設定で休日を判定します。
-- 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務の前後は勤務間隔の制限対象から外れるため、結果をご確認ください。
+- 今月の確定勤務はNG日・曜日制限より優先され、回数上限も必要に応じて緩められます。確定勤務を基準に追加勤務の間隔を守ります。確定勤務同士が近すぎる場合は、確定内容を維持して警告します。
+
+**今月の同じ日・同じ枠を指定した場合、確定当直表への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
 fixed_columns = ["日付", "平日/休日", "A宿直", "B宿直", "外来宿直", "A日直", "B日直", "外来日直"]
@@ -1185,22 +920,25 @@ with col_dl_fixed:
         mime="text/csv",
     )
 with col_ul_fixed:
-    fixed_file = st.file_uploader("過去・決定済み当直表（CSV）をアップロード", type="csv", key="fixed_csv")
+    fixed_file = st.file_uploader("決定済み当直表（CSV）をアップロード", type="csv", key="fixed_csv")
 
 if fixed_file is not None:
     try:
         base_fixed_df = parse_fixed_csv(fixed_file.getvalue())
     except Exception as e:
-        st.warning(f"過去当直ファイルの読み込みに失敗しました。詳細: {e}")
-        base_fixed_df = pd.DataFrame(columns=fixed_columns)
+        st.error(f"確定当直ファイルの読み込みに失敗しました。詳細: {e}")
+        st.stop()
 else:
     base_fixed_df = pd.DataFrame(columns=fixed_columns)
     base_fixed_df.loc[0] = ["" for _ in range(len(fixed_columns))]
 
+if "日付" not in base_fixed_df.columns:
+    st.error("確定当直CSVに「日付」の列がありません。ひな形の列名を確認してください。")
+    st.stop()
 if "日付" in base_fixed_df.columns:
     base_fixed_df = base_fixed_df.set_index("日付")
 
-st.markdown("##### 📅 先月末・今月の確定済み当直")
+st.markdown("### 📅 先月今月来月の確定当直")
 st.write("表のセルをクリックして、日付と担当医師名を入力・編集できます。")
 edited_fixed_df_raw = st.data_editor(base_fixed_df, num_rows="dynamic", use_container_width=True, height=200)
 
@@ -1215,7 +953,7 @@ with st.expander("入力例：曜日・希望日・備考", expanded=False):
     st.markdown("""
 | 項目 | 入力方法・意味 |
 | --- | --- |
-| 翌日PM duty | `水,木` のように半角カンマで区切ります。翌日PMにdutyがある曜日を入力します（例：木曜PMにdutyがある場合は「水」）。原則としてその曜日の宿直を外しますが、翌日が休日なら宿直に入る場合があります。日直は対象外です。 |
+| 翌日PM duty | `水,木` のように半角カンマで区切ります。翌日PMにdutyがある曜日を入力します（例：木曜PMにdutyがある場合は「水」）。原則としてその曜日の宿直を外しますが、翌日が土日祝・特別休日なら宿直に入る場合があります。月末は、上の「翌月1日を特別休日として扱う」も見ます。日直は対象外です。 |
 | 希望日 | `10,15` はその日のいずれかの枠、`10:A宿直` はその枠を希望します。複数の希望は半角カンマで区切ります。 |
 | 指定できる枠 | A宿直・B宿直・外来宿直・A日直・B日直・外来日直。表記を一致させてください。 |
 | 備考 | 管理用のメモです。「学会」などと書いても計算条件には反映されません。休みはNG日で指定してください。 |
@@ -1235,15 +973,17 @@ with st.expander("回数・勤務間隔の数え方", expanded=False):
 
 1つの枠を1回と数えます。確定指定により同じ日に日直と宿直を担当する場合は2回です。
 月間最小回数は、月間最大回数以下に設定してください。
-確定済み当直や優先度100以上の希望がある場合は、上限・間隔の例外があります。
+確定済み当直や優先度100以上の希望がある場合は、上限の例外があります。自動追加勤務の間隔は守り、確定勤務同士の間隔違反は警告します。
     """)
 with st.expander("希望優先度：通常の希望と、100以上の特別な設定", expanded=False):
     st.markdown("""
 - **通常は「1」**を使用します。1〜99は、数字が大きいほど希望を優先しますが、NG日・回数上限・勤務間隔などの範囲内で割り当てます。
 - **100以上は、その医師の希望日すべてを確定扱いにする設定**です。「できれば入りたい」という用途には使わないでください。
-- 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と前後の勤務との間隔も制限対象から外れます。
+- 確定扱いの日はNG日・曜日制限より優先され、回数上限が必要に応じて緩められます。その日と自動追加勤務の間隔は守ります。確定勤務同士の間隔違反は警告します。
 - 一部の勤務だけを確定させたい場合は、上の「確定済み当直」へ入力し、希望優先度は通常の値にしてください。
 - 指定の誤りや条件の組み合わせによっては作成できない場合があります。作成後に確定勤務が反映されているか確認してください。
+
+**今月の同じ日・同じ枠を指定した場合、確定当直表への入力と「希望優先度100以上」での指定は、どちらも固定され、計算上の扱いは基本的に同じです。両方に入力する必要はありません。**
     """)
 
 template_data = {
@@ -1286,10 +1026,17 @@ if uploaded_file is not None:
                 del st.session_state[key]
         st.session_state['last_uploaded_file_id'] = uploaded_file.file_id
         
-    base_df = parse_staff_csv(uploaded_file.getvalue())
+    try:
+        base_df = parse_staff_csv(uploaded_file.getvalue())
+    except Exception as e:
+        st.error(f"医師条件CSVを読み込めませんでした。詳細: {e}")
+        st.stop()
 else:
     base_df = df_template.copy()
 
+if "先生の名前" not in base_df.columns:
+    st.error("医師条件CSVに「先生の名前」の列がありません。ひな形の列名を確認してください。")
+    st.stop()
 if "先生の名前" in base_df.columns:
     base_df = base_df.set_index("先生の名前")
 
@@ -1301,7 +1048,7 @@ for c in text_cols:
     if c in base_df.columns:
         base_df[c] = base_df[c].apply(lambda x: "" if pd.isna(x) or str(x).lower() in ["nan", "none", "<na>"] else str(x))
 
-st.markdown("##### 👩‍⚕️ 医師条件の入力・編集")
+st.markdown("### 👩‍⚕️ 医師条件の入力・編集")
 st.write("セルをクリックして編集できます。列名にマウスを合わせると、入力例や説明が表示されます。医師名は重複しない表記にしてください。")
 
 edited_df = st.data_editor(
@@ -1312,9 +1059,9 @@ edited_df = st.data_editor(
     column_config={
         "翌日PM duty": st.column_config.TextColumn(
             "翌日PM duty",
-            help="例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が休日なら宿直に入る場合があります。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
+            help="例：木曜PMにdutyがある場合は水。複数は水,木のように入力。翌日が土日祝・特別休日なら宿直に入る場合があります。月末は「翌月1日を特別休日として扱う」も見ます。日直は対象外です。確実に外す日はカレンダーでNGを指定してください。"
         ),
-        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務は例外です。"),
+        "最低空ける日数": st.column_config.NumberColumn("最低空ける日数", help="勤務間の空き日数。5日なら10日の次は16日以降。確定勤務と追加勤務の間隔も守ります。確定勤務同士の違反は警告します。"),
         "月間最小回数": st.column_config.NumberColumn("月間最小回数（目標）", help="できるだけ確保したい回数です。条件によっては未達になります。月間最大回数以下にしてください。"),
         "月間最大回数": st.column_config.NumberColumn("月間最大回数", help="日直・宿直を合わせた上限です。確定指定がある場合は例外があります。"),
         "休日最大回数": st.column_config.NumberColumn("休日最大回数", help="土日祝・特別休日の日直と宿直の合計上限です。1枠を1回と数えます。"),
@@ -1331,7 +1078,7 @@ edited_df = st.data_editor(
         ),
         "希望優先度(数字が大きいほど優先)": st.column_config.NumberColumn(
             "希望優先度",
-            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの医師の希望日すべてが確定扱いになり、NG・上限・間隔の例外になります。"
+            help="通常は1。1〜99は数字が大きいほど優先。100以上はこの医師の希望日すべてが確定扱いになり、NG・上限の例外になります。自動追加勤務との間隔は守ります。"
         ),
         "備考（メモ・説明など自由記入）": st.column_config.TextColumn(
             "備考",
@@ -1341,8 +1088,12 @@ edited_df = st.data_editor(
 )
 
 staff_df = edited_df.reset_index()
+staff_df, staff_input_errors = validate_staff_inputs(staff_df, year, month)
+if staff_input_errors:
+    show_input_errors(staff_input_errors)
+    st.stop()
 
-st.markdown("##### ⚖️ 必要枠数と担当可能回数の目安")
+st.markdown("### ⚖️ 必要枠数と担当可能回数の目安")
 st.caption("月間最大回数の合計と必要枠数を比較しています。プラスでも、NG日・勤務間隔・枠別上限などによっては埋まらない場合があります。確定指定で追加される枠や上限の例外は、この目安に含まれません。")
 
 if "月間最大回数" in staff_df.columns:
@@ -1361,7 +1112,7 @@ if "月間最大回数" in staff_df.columns:
         c3.metric("🚨 担当可能回数 − 必要枠数", f"{margin} 回分", delta_color="inverse")
 st.divider()
 
-st.markdown("##### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
+st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
 st.info("医師名のタブを選び、当直NGを選択してください。最後に「NG日を保存する」を押してください。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
@@ -1454,11 +1205,12 @@ if not valid_staff.empty:
                     value = "宿NG" if value == "全NG" else "OK"
                 st.session_state[k] = value
                 component_days.append({"day": d, "weekday": weekdays_ja[dt.weekday()],
-                    "options": options, "value": value, "warning": dt.weekday() in hard_days,
+                    "options": options, "value": value,
+                    "warning": dt.weekday() in hard_days and not next_day_is_holiday(dt, year, month, custom_holidays, next_month_day1_special),
                     "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday")})
             revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
             component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
-            st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。ただし、翌日が休日の場合は宿直に入ることがあります。</div>", unsafe_allow_html=True)
+            st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が土日祝・特別休日の日には出しません。月末は、翌月1日を特別休日にした場合も含みます。</div>", unsafe_allow_html=True)
             response = horizontal_ng_component(HORIZONTAL_NG_HTML)(days=component_days, mode="row" if ng_horizontal else "month", offset=datetime.date(year, month, 1).weekday(), doctor=doc_name, version=revision, key=component_key, default=None)
             seen_key = component_key + "_last_token"
             if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
@@ -1490,9 +1242,9 @@ if not valid_staff.empty:
 
 
 st.divider()
-st.markdown("##### 📂 医師条件をCSVで保存（次回も使う場合）")
+st.markdown("### 📂 医師条件をCSVで保存（次回も使う場合）")
 st.write("医師名・回数・勤務間隔・希望日・保存済みのNG日・備考を保存します。次回は「医師条件」のアップロード欄から読み込んでください。")
-st.caption("保存前に、各医師の「NG日を保存する」を押してください。対象年月・特別休日・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。")
+st.caption("保存前に、各医師の「NG日を保存する」を押してください。対象年月・特別休日・翌月1日の指定・増員設定・確定済み当直・生成結果・色分けとそのメモは、このCSVには含まれません。")
 
 current_csv = staff_df.to_csv(index=False).encode('utf-8-sig')
 st.download_button(
@@ -1503,12 +1255,18 @@ st.download_button(
     use_container_width=True
 )
 
-st.divider()
 
 # ==========================================
 # 4. 当直計算ロジック（関数）
 # ==========================================
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None):
+def add_type_cap(model, worked, forced_vars, cap, bound):
+    # 上限を緩めるのは、その枠で実際に確定した回数が上限を超える分だけ。
+    extra=model.NewIntVar(0,bound,'fixed_type_extra')
+    model.AddMaxEquality(extra,[0,sum(forced_vars)-cap])
+    model.Add(sum(worked)<=cap+extra)
+
+
+def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_day1_special=False):
     _, num_days = calendar.monthrange(target_year, target_month)
     NIGHT_SHIFTS = ['A宿直', 'B宿直', '外来宿直']
     DAY_SHIFTS = ['A日直', 'B日直', '外来日直']
@@ -1554,11 +1312,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
             for s_type in NIGHT_SHIFTS + DAY_SHIFTS:
                 if s_type in row and pd.notna(row[s_type]):
-                    doc_vals = re.split(r'[、,\s]+', str(row[s_type]))
+                    doc_vals = re.split(r'[、,]+', str(row[s_type]))
                     for doc_val in doc_vals:
                         doc_val = doc_val.strip()
                         if doc_val in doctors:
-                            if m == target_month:
+                            if date_obj.year == target_year and m == target_month:
                                 absolute_req_specific[doc_val].append((d, s_type))
                             elif date_obj < datetime.date(target_year, target_month, 1):
                                 past_worked_dates[doc_val].append(date_obj)
@@ -1651,6 +1409,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             absolute_req_days[doc].extend([d for d in req_days[doc] if 1 <= d <= num_days])
             absolute_req_specific[doc].extend([(d, s) for (d, s) in req_specific[doc] if 1 <= d <= num_days])
             
+        absolute_req_specific[doc] = sorted(set(absolute_req_specific[doc]))
+        specified_days = {d for d,s in absolute_req_specific[doc]}
+        absolute_req_days[doc] = sorted(set(absolute_req_days[doc]) - specified_days)
+        past_worked_dates[doc] = sorted(set(past_worked_dates[doc]))
+        future_worked_dates[doc] = sorted(set(future_worked_dates[doc]))
         all_abs_dates = absolute_req_days[doc] + [d for (d, s) in absolute_req_specific[doc]]
         ng_days_dict[doc] = {d: v for d, v in ng_days_dict[doc].items() if d not in all_abs_dates}
 
@@ -1659,6 +1422,11 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         base_shifts = NIGHT_SHIFTS + DAY_SHIFTS if is_holiday(target_year, target_month, d) else NIGHT_SHIFTS
         forced_shifts = [s for doc in doctors for sd, s in absolute_req_specific[doc] if sd == d and s in (NIGHT_SHIFTS + DAY_SHIFTS)]
         daily_active_shifts[d] = list(set(base_shifts + forced_shifts))
+
+    for doc in doctors:
+        for d,slot in req_specific[doc]:
+            if 1 <= d <= num_days and slot not in daily_active_shifts[d]:
+                invalid_requests.append(f'{doc}：{d}日の{slot}は設定されていません。日直なら特別休日を設定するか希望日を修正してください。')
 
     if invalid_requests:
         unique_invalid = list(dict.fromkeys(invalid_requests))
@@ -1706,20 +1474,14 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                         if s in NIGHT_SHIFTS:
                             model.Add(shifts[(d, doc, s)] == 0)
 
-    # 翌日PM dutyは「宿直系」のみNG。ただし【翌日が休日】の場合はOKとする
+    # 翌日PM dutyは「宿直系」のみNG。ただし翌日が休日ならOK。
+    # 休日は土日祝・当月の特別休日。月末だけ、翌月1日を特別休日にした指定も見る。
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
-            next_date = date_obj + datetime.timedelta(days=1)
-            
-            next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
-            if next_date.year == target_year and next_date.month == target_month:
-                if next_date.day in custom_holidays:
-                    next_is_hol = True
-                    
             if (
                 date_obj.weekday() in hard_weekdays[doc]
-                and not next_is_hol
+                and not next_day_is_holiday(date_obj, target_year, target_month, custom_holidays, next_month_day1_special)
                 and d not in absolute_req_days[doc]
                 and not any(sd == d for sd, _ in absolute_req_specific[doc])
             ):
@@ -1742,12 +1504,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             worked = [shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
             if worked:
                 specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
-                actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
-                model.Add(sum(worked) <= actual_max_type)
+                forced_vars = [shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d] and ((d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc])]
+                add_type_cap(model, worked, forced_vars, max_shifts_per_type[doc][s_type], num_days)
 
     min_shortfalls = {}
     for doc in doctors:
-        min_shortfalls[doc] = model.NewIntVar(0, num_days, f'min_shortfall_{doc}')
+        min_shortfalls[doc] = model.NewIntVar(0, min_shifts_total[doc], f'min_shortfall_{doc}')
         worked_all = []
         for d in range(1, num_days + 1):
             for s in daily_active_shifts[d]:
@@ -1762,7 +1524,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             objective_terms.append(min_shortfalls[doc] * -10000)
 
     # ──────────────────────────────────────────────────────────
-    # 【改善】勤務間隔制約：4重ループ → IntervalVar + AddNoOverlap
+    # 勤務間隔制約：確定同士を維持し、自動割当の間隔を守る
     # ──────────────────────────────────────────────────────────
     add_interval_constraints(
         model=model,
@@ -1794,7 +1556,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         actual_hol_max = max(max_hol_shifts_per_doc[doc], abs_hol_count) 
         model.Add(holiday_worked[doc] <= actual_hol_max)
         
-    global_max = num_days * 3 
+    global_max = num_days * 6 
     max_hol_shifts = model.NewIntVar(0, global_max, 'max_hol_shifts')
     for doc in doctors:
         model.Add(holiday_worked[doc] <= max_hol_shifts)
@@ -1851,6 +1613,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             schedule_list.append(row)
             
         warnings = []
+        if status == cp_model.FEASIBLE:
+            warnings.append("必要人数を満たす案です。時間内に最適化を完了したことまでは確認できていません。")
         if over_cap_warnings:
             warnings.append("⚠️ **【重要】以下の枠は「決定済み当直」や「優先度100」が重なったため、AIが自動的に定員を拡張（2名以上配置）して当直を完成させました:**")
             warnings.extend([f"・{w}" for w in over_cap_warnings])
@@ -1861,11 +1625,16 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
         # =========================================================
         # バックアップ（緩和モデル）
         # =========================================================
-        reasons = [] 
+        reasons = []
+        if status == cp_model.MODEL_INVALID:
+            return None, False, ["計算モデルが無効です。入力条件と数値の範囲を確認してください。"], None, None
+        if status == cp_model.UNKNOWN:
+            reasons.append("通常計算では時間内に案を見つけられませんでした。条件が不可能と確定したわけではありません。")
         try:
             relax_model = cp_model.CpModel()
             r_shifts = {}
             dummies = {}
+            r_excess = []
 
             for d in range(1, num_days + 1):
                 for s in daily_active_shifts[d]:
@@ -1878,7 +1647,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     req_count = multi_slots_dict.get((d, s), 1)
                     fixed_docs_count = sum(1 for doc in doctors if (d, s) in absolute_req_specific[doc])
                     actual_req_count = max(req_count, fixed_docs_count)
-                    relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == actual_req_count)
+                    overflow = relax_model.NewIntVar(0, len(doctors), f'r_over_{d}_{s}')
+                    r_excess.append(overflow)
+                    relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == actual_req_count + overflow)
 
             for doc in doctors:
                 for d in range(1, num_days + 1):
@@ -1902,16 +1673,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 
                 for d in range(1, num_days + 1):
                     date_obj = datetime.date(target_year, target_month, d)
-                    next_date = date_obj + datetime.timedelta(days=1)
-                    
-                    next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
-                    if next_date.year == target_year and next_date.month == target_month:
-                        if next_date.day in custom_holidays:
-                            next_is_hol = True
-                            
                     if (
                         date_obj.weekday() in hard_weekdays[doc]
-                        and not next_is_hol
+                        and not next_day_is_holiday(date_obj, target_year, target_month, custom_holidays, next_month_day1_special)
                         and d not in absolute_req_days[doc]
                         and not any(sd == d for sd, _ in absolute_req_specific[doc])
                     ):
@@ -1932,8 +1696,8 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     worked = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d]]
                     if worked:
                         specific_req_count = sum(1 for d, s in absolute_req_specific[doc] if s == s_type)
-                        actual_max_type = max(max_shifts_per_type[doc][s_type], specific_req_count + len(absolute_req_days[doc]))
-                        relax_model.Add(sum(worked) <= actual_max_type)
+                        forced_vars = [r_shifts[(d, doc, s_type)] for d in range(1, num_days + 1) if s_type in daily_active_shifts[d] and ((d, s_type) in absolute_req_specific[doc] or d in absolute_req_days[doc])]
+                        add_type_cap(relax_model, worked, forced_vars, max_shifts_per_type[doc][s_type], num_days)
 
                 worked_all = []
                 for d in range(1, num_days + 1):
@@ -1985,10 +1749,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                 10 * len(outpatient_night_missing) * outpatient_night_weight
                 + 10 * len(outpatient_day_missing) + 1
             )
+            excess_bound = len(r_excess) * len(doctors)
             relax_model.Minimize(
-                primary_weight * sum(primary_missing)
+                (primary_weight * sum(primary_missing)
                 + outpatient_night_weight * sum(outpatient_night_missing)
-                + sum(outpatient_day_missing)
+                + sum(outpatient_day_missing)) * (excess_bound + 1)
+                + sum(r_excess)
             )
 
             relax_solver = cp_model.CpSolver()
@@ -2035,7 +1801,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                     reasons.append("A宿直・B宿直・A日直・B日直を同順位で最優先とし、次に外来宿直、最後に外来日直の不足を減らす方針で作成しました。条件によっては優先枠にも不足が残ります。")
                     if relax_status == cp_model.FEASIBLE:
                         reasons.append("計算時間内に得られた案です。優先順位に沿った不足の最小化が完了したことまでは確認できていません。")
-                    reasons.append("🚨 **以下の枠に誰も割り当てられませんでした:**")
+                    reasons.append("🚨 **以下の枠で必要人数が不足しています:**")
                     reasons.extend(bottlenecks)
                     reasons.append("")
                     reasons.append("📊 **【不足している枠の合計】**")
@@ -2045,6 +1811,12 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
                             reasons.append(f"・{s}： 計 {count} 枠不足")
                     
                 return partial_df, False, reasons, past_worked_dates, future_worked_dates
+            if relax_status == cp_model.INFEASIBLE:
+                reasons.append("不足枠を許容しても条件が矛盾し、当直案を作成できませんでした。確定指定と上限を確認してください。")
+            elif relax_status == cp_model.MODEL_INVALID:
+                reasons.append("不足枠計算のモデルが無効です。入力値を確認してください。")
+            else:
+                reasons.append("不足枠を含む案も時間内に見つかりませんでした。条件が不可能と確定したわけではありません。")
         except Exception as e:
             reasons.append(f"⚠️ 部分的な当直表の作成中にもエラーが発生しました。詳細: {e}")
 
@@ -2054,59 +1826,69 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
 # 5. 実行ボタンと結果表示
 # ==========================================
 st.divider()
+st.markdown("""
+<style>
+.st-key-create_duty_action button {
+    width: 100%;
+    min-height: 60px;
+}
+.st-key-create_duty_action button p {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+</style>
+""", unsafe_allow_html=True)
+create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
-st.info("各医師の「NG日を保存する」を押したら、「当直案を作成する」を押してください。結果の担当者・回数・勤務間隔・希望日を確認してから、CSVをダウンロードします。")
-st.caption("年月や入力条件を変更しても、表示中の結果は自動更新されません。変更後は必ず再作成してください。")
-with st.expander("不足枠が出た場合・作成できない場合", expanded=False):
-    st.markdown("""
-- 表に「⚠️不足」と表示された枠は、必要人数を満たしていません。
-- 入力内容を確認し、実際に調整できる範囲で、月間・休日・枠別の上限や勤務間隔を見直して再作成してください。
-- 時間内に当直案を見つけられない場合もあります。
-- 結果表は、この画面では直接編集できません。手動調整する場合はCSVをダウンロードし、Excelなどで編集してください。
-    """)
+result_notice_container = st.container()
 
 staff_df = staff_df[staff_df['先生の名前'].astype(str).str.strip() != '']
 staff_df = staff_df.dropna(subset=['先生の名前']).reset_index(drop=True)
 
-fixed_df = edited_fixed_df[edited_fixed_df['日付'].astype(str).str.strip() != '']
-fixed_df = fixed_df.dropna(subset=['日付']).reset_index(drop=True)
+fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['先生の名前'].tolist(), year, month)
+if fixed_input_errors:
+    show_input_errors(fixed_input_errors)
+    st.stop()
+current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_day1_special)
+if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
+    for key in ['generated_df','past_worked_dates','future_worked_dates','generated_warnings','generated_signature','generated_year','generated_month']:
+        st.session_state.pop(key, None)
+    st.session_state['result_needs_refresh'] = True
+if st.session_state.get('result_needs_refresh'):
+    st.warning("条件が変更されています。再作成してください。前回の結果表示とダウンロードを停止しました。")
 
 if len(staff_df) > 0:
-    if st.button("🚀 この条件で当直案を作成する", type="primary"):
+    with create_button_container:
+        create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
+    if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_day1_special)
                 
-                if success:
+                if df_result is not None:
+                    st.session_state['generated_signature'] = current_signature
+                    st.session_state['generated_year'] = year
+                    st.session_state['generated_month'] = month
+                    st.session_state['generated_warnings'] = error_reasons
+                    st.session_state['result_needs_refresh'] = False
+                if df_result is not None and not df_result.empty:
                     st.session_state['generated_df'] = df_result
-                    st.session_state['past_worked_dates'] = past_worked_dates
-                    st.session_state['future_worked_dates'] = future_worked_dates
-                    st.success("✨ 必要人数を満たす当直案ができました。確定勤務・勤務間隔・各種回数・希望日の反映を確認してください。月間最小回数は未達の場合があり、確定指定には上限・間隔の例外があります。")
-                    
-                    if error_reasons:
-                        for warning in error_reasons:
-                            st.warning(warning)
-                            
+                    st.session_state['past_worked_dates'] = past_worked_dates or {}
+                    st.session_state['future_worked_dates'] = future_worked_dates or {}
                 else:
-                    if df_result is not None and not df_result.empty:
-                        st.session_state['generated_df'] = df_result
-                        st.session_state['past_worked_dates'] = past_worked_dates or {}
-                        st.session_state['future_worked_dates'] = future_worked_dates or {}
-                        
-                        st.error("⚠️ **不足枠を含む当直案です。赤い「⚠️不足」の人数を確認してください。**")
-                        for reason in error_reasons:
-                            st.write(reason)
-                        st.info("👇 条件を見直して再作成するか、CSVをダウンロードしてExcelなどで不足枠を調整してください。")
-                    else:
-                        if 'generated_df' in st.session_state:
-                            del st.session_state['generated_df']
-                        st.error("❌ **今回は当直案を作成できませんでした。表示された内容と入力条件を確認してください。**")
-                        for reason in error_reasons:
-                            st.write(reason)
+                    st.session_state.pop('generated_df', None)
+                    with result_notice_container:
+                        show_schedule_notice(None, error_reasons)
             except Exception as e:
-                st.error(f"当直計算中にエラーが発生しました。詳細: {e}")
+                st.session_state.pop('generated_df', None)
+                with result_notice_container:
+                    show_schedule_notice(None, [f"当直計算中にエラーが発生しました。詳細: {e}"])
 
     if 'generated_df' in st.session_state:
+        year = st.session_state['generated_year']
+        month = st.session_state['generated_month']
+        with result_notice_container:
+            show_schedule_notice(st.session_state['generated_df'], st.session_state.get('generated_warnings', []))
         df_result = st.session_state['generated_df'].reindex(columns=["日付", "平日/休日", "A日直", "A宿直", "B日直", "B宿直", "外来日直", "外来宿直"])
         past_worked_dates = st.session_state.get('past_worked_dates', {})
         future_worked_dates = st.session_state.get('future_worked_dates', {})
@@ -2119,7 +1901,7 @@ if len(staff_df) > 0:
         table_container = st.container()
         
         st.divider()
-        st.markdown("<span style='font-size: 0.95rem; font-weight: bold;'>🔍 特定の医師の当直を色別でハイライト</span>", unsafe_allow_html=True)
+        st.subheader("🔍 特定の医師の当直を色別でハイライト")
         st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
         
         c1, c2 = st.columns(2)
