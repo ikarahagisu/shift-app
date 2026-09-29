@@ -97,6 +97,19 @@ def parse_shift_date(date_value, target_year, target_month):
 # ==========================================
 # カレンダー一括操作用の裏側ロジック
 # ==========================================
+def pm_duty_restricted(date_obj, weekdays, target_year, target_month, custom_holidays, next_month_special_holiday=False):
+    """翌日が勤務日の場合だけ、指定曜日の宿直を制限する。"""
+    next_date = date_obj + datetime.timedelta(days=1)
+    next_month_first = datetime.date(target_year, target_month, calendar.monthrange(target_year, target_month)[1]) + datetime.timedelta(days=1)
+    next_is_holiday = (
+        next_date.weekday() >= 5
+        or jpholiday.is_holiday(next_date)
+        or ((next_date.year, next_date.month) == (target_year, target_month) and next_date.day in custom_holidays)
+        or (next_month_special_holiday and next_date == next_month_first)
+    )
+    return date_obj.weekday() in weekdays and not next_is_holiday
+
+
 def set_all_ng(doc_name, y, m, ndays, val, custom_hols=[]):
     for d in range(1, ndays + 1):
         if val == "OK":
@@ -156,7 +169,7 @@ def horizontal_ng_component(html_source):
     asset_id = hashlib.sha256(html_source.encode("utf-8")).hexdigest()[:16]
     return components.declare_component(f"shift_ng_{asset_id}", path=str(directory))
 
-HORIZONTAL_NG_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.day.holiday{color:#c92336}.day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}\n\n.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:8px}\n.month .cell{width:auto;min-width:0;padding:5px;flex:none}\n.month .head{height:72px}.weekday{text-align:center;font-weight:700;padding:4px}.blank{min-height:126px;background:#f5f6f8;border-radius:9px}\n@media(max-width:600px){.strip.month{gap:3px}.month .cell{padding:2px;border-width:1px}.month .day{font-size:12px}.month .state{font-size:11px}.month select{font-size:11px;padding:0;height:30px}.month .head{height:66px}.month .blank{min-height:108px}.weekday{font-size:12px}}\n\n/* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */\n.cell,.month .cell{background:#fff;border-color:#cbd2dc}\n.head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}\n.state{width:100%;display:grid;grid-template-rows:repeat(2,29px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}\n.band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}\n.band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}\n.cell[data-state="全NG"] .band{background:#b42332;color:#fff}\n.cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}\n.cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}\n.warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}\n.weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}\n.blank{min-height:176px}\n@media(max-width:600px){.month .head{height:120px}.month .band{font-size:10px}.month .weekday-warning{font-size:15px;padding:0 3px}.month .blank{min-height:160px}}\n\n.weekday-warning{display:inline-flex;align-items:center;justify-content:center;gap:3px;max-width:100%}\n.duty-label{font-size:9px;font-weight:650;line-height:1.15;white-space:nowrap}\n@media(max-width:600px){.month .weekday-warning{gap:1px;padding:0 1px;font-size:12px}.month .duty-label{font-size:8px;white-space:normal;max-width:30px;overflow-wrap:anywhere}}\n\n/* 日付の文字・休日色・警告の有無によらず各段の位置を固定する。 */\n.head,.month .head{\n display:grid;\n grid-template-columns:minmax(0,1fr);\n grid-template-rows:26px 30px 60px;\n justify-content:stretch;\n width:100%;\n min-width:0;\n align-content:end;\n align-items:center;\n justify-items:center;\n gap:4px;\n padding-top:0;\n padding-bottom:0;\n}\n.head > .day{line-height:24px;margin:0;align-self:center}\n.head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}\n.head > .state{height:60px;min-height:60px;margin:0;align-self:end}\n@media(max-width:600px){\n .month .head{grid-template-rows:22px 30px 60px}\n}\n/* 休日はNGの勤務帯をすべて同じ赤にする。平日の宿NGは従来の青。 */\n.cell[data-holiday="true"][data-state="日NG"] .day-band,\n.cell[data-holiday="true"][data-state="宿NG"] .night-band,\n.cell[data-holiday="true"][data-state="全NG"] .band{background:#b42332;color:#fff}\n</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を保存する</button><script>\nlet version=null,days=[],draft=[],seen=null;let mode=\'row\';let frameHeight=0;function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send(\'streamlit:setFrameHeight\',{height:h})}}const labels={OK:\'OK\',\'全NG\':\'✕ 全NG\',\'日NG\':\'☀ 日NG\',\'宿NG\':\'☾ 宿NG\'};\nfunction send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},\'*\')}\nfunction paint(cell,value){cell.dataset.state=value;let holiday=cell.dataset.holiday===\'true\';cell.querySelector(\'.day-band\').textContent=holiday?(value===\'全NG\'||value===\'日NG\'?\'日直NG\':\'日直可\'):\'日直なし\';cell.querySelector(\'.night-band\').textContent=value===\'全NG\'||value===\'宿NG\'?\'宿直NG\':\'宿直可\';}\nwindow.addEventListener(\'message\',(event)=>{if(event.data.type!==\'streamlit:render\')return;let a=event.data.args;document.getElementById(\'apply\').textContent=a.doctor+\'先生のNG日を保存する\';if(a.version!==version){version=a.version;mode=a.mode||\'row\';days=a.days;draft=days.map(d=>d.value);let strip=document.getElementById(\'strip\');strip.replaceChildren();strip.className=\'strip \'+(mode===\'month\'?\'month\':\'\');if(mode===\'month\'){[\'月\',\'火\',\'水\',\'木\',\'金\',\'土\',\'日\'].forEach((w,i)=>{let el=document.createElement(\'div\');el.className=\'weekday\';el.textContent=w;el.style.color=i===6?\'#c92336\':i===5?\'#1670c5\':\'#243247\';strip.append(el)});for(let i=0;i<a.offset;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}days.forEach((d,i)=>{let cell=document.createElement(\'div\');cell.className=\'cell\';cell.dataset.holiday=String(d.options.includes(\'日NG\'));let head=document.createElement(\'div\');head.className=\'head\';let day=document.createElement(\'div\');day.className=\'day \'+d.kind;day.textContent=mode===\'month\'?d.day+\'日\':d.day+\'日（\'+d.weekday+\'）\';let state=document.createElement(\'div\');state.className=\'state\';let dayBand=document.createElement(\'div\');dayBand.className=\'band day-band\'+(d.options.includes(\'日NG\')?\'\':\' off\');let nightBand=document.createElement(\'div\');nightBand.className=\'band night-band\';state.append(dayBand,nightBand);let warningSlot=document.createElement(\'div\');warningSlot.className=\'warning-slot\';if(d.warning){let warning=document.createElement(\'span\');warning.className=\'weekday-warning\';warning.textContent=\'⚠︎\';let duty=document.createElement(\'small\');duty.className=\'duty-label\';duty.textContent=\'翌日PM duty\';warning.append(duty);warning.title=\'翌日PM duty（翌日が休日なら例外あり）\';warning.setAttribute(\'aria-label\',warning.title);warningSlot.append(warning)}head.append(day,warningSlot,state);let sel=document.createElement(\'select\');sel.setAttribute(\'aria-label\',d.day+\'日のNG設定\');d.options.forEach(v=>{let o=document.createElement(\'option\');o.value=v;o.textContent=labels[v];sel.append(o)});sel.value=d.value;sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById(\'note\').textContent=\'未保存の変更があります。選び終わったら下のボタンを押してください。\'};cell.append(head,sel);paint(cell,d.value);strip.append(cell)});if(mode===\'month\'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}document.getElementById(\'note\').textContent=\'NGを選ぶと色が変わります。選び終わったら保存してください。\';}resize()});\ndocument.getElementById(\'apply\').onclick=()=>{send(\'streamlit:setComponentValue\',{value:{version,values:draft,token:Date.now().toString()+\'-\'+Math.random()},dataType:\'json\'});document.getElementById(\'note\').textContent=\'保存しています…\';};new ResizeObserver(resize).observe(document.body);send(\'streamlit:componentReady\',{apiVersion:1});resize();\n</script></body></html>'
+HORIZONTAL_NG_HTML = '<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>\n*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;color:#243247;background:white;font-size:14px}.strip{display:flex;gap:8px;overflow-x:auto;width:100%;padding:6px 2px 16px;align-items:stretch;scrollbar-width:auto}.cell{flex:0 0 112px;width:112px;min-width:112px;border:2px solid #dfe3ea;border-radius:9px;padding:6px;background:#f8fafc}.head{height:78px;display:flex;flex-direction:column;justify-content:center;align-items:center;border-radius:5px;gap:5px;font-weight:750;white-space:nowrap}.day{font-size:16px}.state{font-size:14px}.day.holiday{color:#c92336}.day.saturday{color:#1670c5}select{width:100%;height:36px;margin-top:6px;font-size:14px;font-weight:650;border:1px solid #8b95a5;border-radius:5px;background:white;color:#243247;padding:2px}button{background:#ff4b4b;color:white;border:0;border-radius:7px;padding:12px 18px;font:600 14px system-ui;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4789ff;outline-offset:2px}.note{margin:8px 0;font-size:13px;color:#566174;min-height:20px}\n\n.strip.month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;overflow:visible;padding-bottom:8px}\n.month .cell{width:auto;min-width:0;padding:5px;flex:none}\n.month .head{height:72px}.weekday{text-align:center;font-weight:700;padding:4px}.blank{min-height:126px;background:#f5f6f8;border-radius:9px}\n@media(max-width:600px){.strip.month{gap:3px}.month .cell{padding:2px;border-width:1px}.month .day{font-size:12px}.month .state{font-size:11px}.month select{font-size:11px;padding:0;height:30px}.month .head{height:66px}.month .blank{min-height:108px}.weekday{font-size:12px}}\n\n/* 上段が日直、下段が宿直。不可の勤務帯だけ塗る。 */\n.cell,.month .cell{background:#fff;border-color:#cbd2dc}\n.head,.month .head{height:124px;gap:4px;justify-content:flex-start;padding-top:2px;color:#243247;background:transparent}\n.state{width:100%;display:grid;grid-template-rows:repeat(2,29px);gap:0;border:1px solid #d6dce5;border-radius:5px;overflow:hidden;order:3}\n.band{display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:750;background:#fff;color:#425268;white-space:nowrap}\n.band + .band{border-top:1px solid #d6dce5}.band.off{background:#fcfcfd;color:#d8dde5;font-weight:400}\n.cell[data-state="全NG"] .band{background:#b42332;color:#fff}\n.cell[data-state="日NG"] .day-band{background:#9a4700;color:#fff}\n.cell[data-state="宿NG"] .night-band{background:#1856a4;color:#fff}\n.warning-slot{height:22px;min-height:22px;display:flex;align-items:center;justify-content:center}\n.weekday-warning{color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:4px;padding:0 4px;font-size:14px;font-weight:900;line-height:20px}\n.blank{min-height:176px}\n@media(max-width:600px){.month .head{height:120px}.month .band{font-size:10px}.month .weekday-warning{font-size:15px;padding:0 3px}.month .blank{min-height:160px}}\n\n.weekday-warning{display:inline-flex;align-items:center;justify-content:center;gap:3px;max-width:100%}\n.duty-label{font-size:9px;font-weight:650;line-height:1.15;white-space:nowrap}\n@media(max-width:600px){.month .weekday-warning{gap:1px;padding:0 1px;font-size:12px}.month .duty-label{font-size:8px;white-space:normal;max-width:30px;overflow-wrap:anywhere}}\n\n/* 日付の文字・休日色・警告の有無によらず各段の位置を固定する。 */\n.head,.month .head{\n display:grid;\n grid-template-columns:minmax(0,1fr);\n grid-template-rows:26px 30px 60px;\n justify-content:stretch;\n width:100%;\n min-width:0;\n align-content:end;\n align-items:center;\n justify-items:center;\n gap:4px;\n padding-top:0;\n padding-bottom:0;\n}\n.head > .day{line-height:24px;margin:0;align-self:center}\n.head > .warning-slot{height:30px;min-height:30px;width:100%;margin:0}\n.head > .state{height:60px;min-height:60px;margin:0;align-self:end}\n@media(max-width:600px){\n .month .head{grid-template-rows:22px 30px 60px}\n}\n/* 休日はNGの勤務帯をすべて同じ赤にする。平日の宿NGは従来の青。 */\n.cell[data-holiday="true"][data-state="日NG"] .day-band,\n.cell[data-holiday="true"][data-state="宿NG"] .night-band,\n.cell[data-holiday="true"][data-state="全NG"] .band{background:#b42332;color:#fff}\n</style><body><div id="strip" class="strip" aria-label="NG日カレンダー"></div><div id="note" class="note">左右へスクロールして選択できます。</div><button id="apply" type="button">NG日を保存する</button><script>\nlet version=null,days=[],draft=[],seen=null;let mode=\'row\';let frameHeight=0;function resize(){let h=document.body.scrollHeight+10;if(h!==frameHeight){frameHeight=h;send(\'streamlit:setFrameHeight\',{height:h})}}const labels={OK:\'OK\',\'全NG\':\'✕ 全NG\',\'日NG\':\'☀ 日NG\',\'宿NG\':\'☾ 宿NG\'};\nfunction send(type,data={}){window.parent.postMessage({isStreamlitMessage:true,type,...data},\'*\')}\nfunction paint(cell,value){cell.dataset.state=value;let holiday=cell.dataset.holiday===\'true\';cell.querySelector(\'.day-band\').textContent=holiday?(value===\'全NG\'||value===\'日NG\'?\'日直NG\':\'日直可\'):\'日直なし\';cell.querySelector(\'.night-band\').textContent=value===\'全NG\'||value===\'宿NG\'?\'宿直NG\':\'宿直可\';}\nwindow.addEventListener(\'message\',(event)=>{if(event.data.type!==\'streamlit:render\')return;let a=event.data.args;document.getElementById(\'apply\').textContent=a.doctor+\'先生のNG日を保存する\';if(a.version!==version){version=a.version;mode=a.mode||\'row\';days=a.days;draft=days.map(d=>d.value);let strip=document.getElementById(\'strip\');strip.replaceChildren();strip.className=\'strip \'+(mode===\'month\'?\'month\':\'\');if(mode===\'month\'){[\'月\',\'火\',\'水\',\'木\',\'金\',\'土\',\'日\'].forEach((w,i)=>{let el=document.createElement(\'div\');el.className=\'weekday\';el.textContent=w;el.style.color=i===6?\'#c92336\':i===5?\'#1670c5\':\'#243247\';strip.append(el)});for(let i=0;i<a.offset;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}days.forEach((d,i)=>{let cell=document.createElement(\'div\');cell.className=\'cell\';cell.dataset.holiday=String(d.options.includes(\'日NG\'));let head=document.createElement(\'div\');head.className=\'head\';let day=document.createElement(\'div\');day.className=\'day \'+d.kind;day.textContent=mode===\'month\'?d.day+\'日\':d.day+\'日（\'+d.weekday+\'）\';let state=document.createElement(\'div\');state.className=\'state\';let dayBand=document.createElement(\'div\');dayBand.className=\'band day-band\'+(d.options.includes(\'日NG\')?\'\':\' off\');let nightBand=document.createElement(\'div\');nightBand.className=\'band night-band\';state.append(dayBand,nightBand);let warningSlot=document.createElement(\'div\');warningSlot.className=\'warning-slot\';if(d.warning){let warning=document.createElement(\'span\');warning.className=\'weekday-warning\';warning.textContent=\'⚠︎\';let duty=document.createElement(\'small\');duty.className=\'duty-label\';duty.textContent=\'翌日PM duty\';warning.append(duty);warning.title=\'翌日PM duty（翌日は平日）\';warning.setAttribute(\'aria-label\',warning.title);warningSlot.append(warning)}head.append(day,warningSlot,state);let sel=document.createElement(\'select\');sel.setAttribute(\'aria-label\',d.day+\'日のNG設定\');d.options.forEach(v=>{let o=document.createElement(\'option\');o.value=v;o.textContent=labels[v];sel.append(o)});sel.value=d.value;sel.onchange=()=>{draft[i]=sel.value;paint(cell,sel.value);document.getElementById(\'note\').textContent=\'未保存の変更があります。選び終わったら下のボタンを押してください。\'};cell.append(head,sel);paint(cell,d.value);strip.append(cell)});if(mode===\'month\'){let blanks=(7-(a.offset+days.length)%7)%7;for(let i=0;i<blanks;i++){let el=document.createElement(\'div\');el.className=\'blank\';strip.append(el)}}document.getElementById(\'note\').textContent=\'NGを選ぶと色が変わります。選び終わったら保存してください。\';}resize()});\ndocument.getElementById(\'apply\').onclick=()=>{send(\'streamlit:setComponentValue\',{value:{version,values:draft,token:Date.now().toString()+\'-\'+Math.random()},dataType:\'json\'});document.getElementById(\'note\').textContent=\'保存しています…\';};new ResizeObserver(resize).observe(document.body);send(\'streamlit:componentReady\',{apiVersion:1});resize();\n</script></body></html>'
 
 
 def build_hover_schedule_html(df, shift_columns, doctors, color_style):
@@ -339,14 +352,14 @@ def validate_fixed_inputs(df, doctors, year, month):
             df.at[i,s]='、'.join(names)
     return df,errors
 
-def input_signature(year, month, staff, holidays, multi, fixed):
+def input_signature(year, month, staff, holidays, multi, fixed, next_month_special_holiday=False):
     import hashlib
     import json
-    payload=[year,month,staff.to_csv(index=False),sorted(holidays), sorted((d,s,c) for (d,s),c in multi.items()),fixed.to_csv(index=False)]
+    payload=[year,month,bool(next_month_special_holiday),staff.to_csv(index=False),sorted(holidays), sorted((d,s,c) for (d,s),c in multi.items()),fixed.to_csv(index=False)]
     return hashlib.sha256(json.dumps(payload,ensure_ascii=False).encode()).hexdigest()
 
 
-def audit_schedule(result, staff, year, month, holidays, multi, past, future):
+def audit_schedule(result, staff, year, month, holidays, multi, past, future, next_month_special_holiday=False):
     warnings=[]
     for _,row in staff.iterrows():
         name=row['先生の名前']
@@ -360,15 +373,13 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future):
         ng = dict(checked_day_items(row.get('NG日(半角カンマ区切り)', ''), year, month, True))
         for _, r in result.iterrows():
             dt = parse_shift_date(r['日付'], year, month)
-            next_dt = dt + datetime.timedelta(days=1)
-            next_holiday = next_dt.weekday() >= 5 or jpholiday.is_holiday(next_dt) or ((next_dt.year,next_dt.month)==(year,month) and next_dt.day in holidays)
             for slot in ALL_SHIFT_TYPES:
                 if name not in [n.strip() for n in re.split('[、,]', str(r[slot]))]: continue
                 kind = ng.get(dt.day, 'OK')
                 night = slot in ['A宿直','B宿直','外来宿直']
                 if kind=='全NG' or (kind=='宿NG' and night) or (kind=='日NG' and not night):
                     warnings.append(f'{name}：{dt} {slot}はNG指定より確定指定を優先しました。')
-                if night and '月火水木金土日'[dt.weekday()] in clean_text(row.get('翌日PM duty','')) and not next_holiday:
+                if night and pm_duty_restricted(dt, [i for i,w in enumerate('月火水木金土日') if w in clean_text(row.get('翌日PM duty',''))], year, month, holidays, next_month_special_holiday):
                     warnings.append(f'{name}：{dt} {slot}は翌日PM dutyの制限より確定指定を優先しました。')
         total=sum(counts.values())
         if total < int(row['月間最小回数']):
@@ -392,7 +403,7 @@ def audit_schedule(result, staff, year, month, holidays, multi, past, future):
     return warnings
 
 
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None):
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False):
     staff_df,errors=validate_staff_inputs(staff_df,target_year,target_month)
     fixed_df,fixed_errors=validate_fixed_inputs(fixed_df,staff_df.get('先生の名前',pd.Series(dtype=str)).tolist(),target_year,target_month)
     errors+=fixed_errors
@@ -405,9 +416,9 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             if not(dt.weekday()>=5 or jpholiday.is_holiday(dt) or d in custom_holidays):
                 errors.append(f'{d}日の日直増員：先に特別休日を指定してください。')
     if errors:return None,False,errors,None,None
-    result,success,warnings,past,future=_generate_shift_core(target_year,target_month,staff_df,custom_holidays,multi_slots_dict,fixed_df)
+    result,success,warnings,past,future=_generate_shift_core(target_year,target_month,staff_df,custom_holidays,multi_slots_dict,fixed_df,next_month_special_holiday)
     if result is not None:
-        warnings+=audit_schedule(result,staff_df,target_year,target_month,custom_holidays,multi_slots_dict,past,future)
+        warnings+=audit_schedule(result,staff_df,target_year,target_month,custom_holidays,multi_slots_dict,past,future,next_month_special_holiday)
         success=not any('⚠️不足' in str(v) for s in ALL_SHIFT_TYPES for v in result[s])
     return result,success,list(dict.fromkeys(warnings)),past,future
 
@@ -784,6 +795,13 @@ with st.container(key="special_holiday_calendar"):
                             key=f"hol_{year}_{month}_{day}"
                         ):
                             custom_holidays.append(day)
+
+next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
+next_month_special_holiday = st.checkbox(
+    f"翌月1日（{next_month_first.year}/{next_month_first.month}/1）を特別休日として扱う",
+    key=f"next_month_special_holiday_{year}_{month}",
+    help="翌月1日が病院独自の休みの場合に選択してください。月末の「翌日PM duty」の判定に使います。土日・祝日は自動で休日扱いです。"
+)
 
 holiday_total_placeholder = st.empty()
 
@@ -1166,11 +1184,11 @@ if not valid_staff.empty:
                     value = "宿NG" if value == "全NG" else "OK"
                 st.session_state[k] = value
                 component_days.append({"day": d, "weekday": weekdays_ja[dt.weekday()],
-                    "options": options, "value": value, "warning": dt.weekday() in hard_days,
+                    "options": options, "value": value, "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
                     "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday")})
             revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
             component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
-            st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。ただし、翌日が休日の場合は宿直に入ることがあります。</div>", unsafe_allow_html=True)
+            st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
             response = horizontal_ng_component(HORIZONTAL_NG_HTML)(days=component_days, mode="row" if ng_horizontal else "month", offset=datetime.date(year, month, 1).weekday(), doctor=doc_name, version=revision, key=component_key, default=None)
             seen_key = component_key + "_last_token"
             if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
@@ -1226,7 +1244,7 @@ def add_type_cap(model, worked, forced_vars, cap, bound):
     model.Add(sum(worked)<=cap+extra)
 
 
-def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None):
+def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False):
     _, num_days = calendar.monthrange(target_year, target_month)
     NIGHT_SHIFTS = ['A宿直', 'B宿直', '外来宿直']
     DAY_SHIFTS = ['A日直', 'B日直', '外来日直']
@@ -1438,16 +1456,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     for doc in doctors:
         for d in range(1, num_days + 1):
             date_obj = datetime.date(target_year, target_month, d)
-            next_date = date_obj + datetime.timedelta(days=1)
-            
-            next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
-            if next_date.year == target_year and next_date.month == target_month:
-                if next_date.day in custom_holidays:
-                    next_is_hol = True
-                    
             if (
-                date_obj.weekday() in hard_weekdays[doc]
-                and not next_is_hol
+                pm_duty_restricted(date_obj, hard_weekdays[doc], target_year, target_month, custom_holidays, next_month_special_holiday)
                 and d not in absolute_req_days[doc]
                 and not any(sd == d for sd, _ in absolute_req_specific[doc])
             ):
@@ -1639,16 +1649,8 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
 
                 for d in range(1, num_days + 1):
                     date_obj = datetime.date(target_year, target_month, d)
-                    next_date = date_obj + datetime.timedelta(days=1)
-                    
-                    next_is_hol = next_date.weekday() >= 5 or jpholiday.is_holiday(next_date)
-                    if next_date.year == target_year and next_date.month == target_month:
-                        if next_date.day in custom_holidays:
-                            next_is_hol = True
-                            
                     if (
-                        date_obj.weekday() in hard_weekdays[doc]
-                        and not next_is_hol
+                        pm_duty_restricted(date_obj, hard_weekdays[doc], target_year, target_month, custom_holidays, next_month_special_holiday)
                         and d not in absolute_req_days[doc]
                         and not any(sd == d for sd, _ in absolute_req_specific[doc])
                     ):
@@ -1822,7 +1824,7 @@ fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['
 if fixed_input_errors:
     show_input_errors(fixed_input_errors)
     st.stop()
-current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
+current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday)
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df','past_worked_dates','future_worked_dates','generated_warnings','generated_signature','generated_year','generated_month']:
         st.session_state.pop(key, None)
@@ -1836,7 +1838,7 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday)
                 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
