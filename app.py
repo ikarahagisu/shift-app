@@ -1156,11 +1156,18 @@ with st.container(key="special_holiday_calendar"):
                             custom_holidays.append(day)
 
 next_month_first = datetime.date(year, month, calendar.monthrange(year, month)[1]) + datetime.timedelta(days=1)
-next_month_special_holiday = st.checkbox(
-    f"翌月1日（{next_month_first.year}/{next_month_first.month}/1）を特別休日として扱う",
-    key=f"next_month_special_holiday_{year}_{month}",
-    help="翌月1日が病院独自の休みの場合に選択してください。月末の「翌日PM duty」の判定に使います。土日・祝日は自動で休日扱いです。"
-)
+next_month_first_label = f"{next_month_first.year}/{next_month_first.month}/1（{WEEKDAYS_JA[next_month_first.weekday()]}）"
+if next_month_first.weekday() >= 5 or jpholiday.is_holiday(next_month_first):
+    # 土日祝は自動で休日扱いになるため、チェックボックスは表示しない
+    holiday_reason = "祝日" if jpholiday.is_holiday(next_month_first) else WEEKDAYS_JA[next_month_first.weekday()] + "曜日"
+    st.caption(f"翌月1日 {next_month_first_label} は{holiday_reason}のため、自動で休日として扱います（設定不要です）。")
+    next_month_special_holiday = False
+else:
+    next_month_special_holiday = st.checkbox(
+        f"翌月1日 {next_month_first_label} を特別休日として扱う",
+        key=f"next_month_special_holiday_{year}_{month}",
+        help="翌月1日が病院独自の休みの場合に選択してください。月末の「翌日PM duty」の判定に使います。"
+    )
 
 holiday_total_placeholder = st.empty()
 
