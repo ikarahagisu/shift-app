@@ -538,9 +538,46 @@ def validate_fixed_inputs(df, doctors, year, month, holidays=None):
     return df, errors
 
 
-def input_signature(year, month, staff, holidays, multi, fixed, next_month_special_holiday=False):
-    payload = [year, month, bool(next_month_special_holiday), staff.to_csv(index=False), sorted(holidays), sorted((d, s, c) for (d, s), c in multi.items()), fixed.to_csv(index=False)]
+def input_signature(year, month, staff, holidays, multi, fixed, next_month_special_holiday=False, shortage_priority=None):
+    payload = [year, month, bool(next_month_special_holiday), staff.to_csv(index=False), sorted(holidays), sorted((d, s, c) for (d, s), c in multi.items()), fixed.to_csv(index=False),
+               sorted(normalize_shortage_priority(shortage_priority).items())]
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
+
+
+# ==========================================
+# 人数が足りないときに、どの枠を優先して埋めるか
+# 数字が小さいほど優先。同じ数字の枠は同順位として扱う。
+# ==========================================
+DEFAULT_SHORTAGE_PRIORITY = {'A宿直': 1, 'B宿直': 1, 'A日直': 1, 'B日直': 1, '外来宿直': 2, '外来日直': 3}
+
+
+def normalize_shortage_priority(priority):
+    """未指定や不正な値は初期設定に戻す。"""
+    result = dict(DEFAULT_SHORTAGE_PRIORITY)
+    for s, rank in (priority or {}).items():
+        if s in result:
+            try:
+                rank = int(rank)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= rank <= len(ALL_SHIFT_TYPES):
+                result[s] = rank
+    return result
+
+
+def shortage_priority_groups(priority):
+    """優先度の高い順に、同順位の枠をまとめたリストを返す。例：[['A宿直','B宿直'], ['外来宿直']]"""
+    priority = normalize_shortage_priority(priority)
+    ranks = sorted(set(priority.values()))
+    return [[s for s in ALL_SHIFT_TYPES if priority[s] == r] for r in ranks]
+
+
+def shortage_priority_text(priority):
+    groups = shortage_priority_groups(priority)
+    if len(groups) == 1:
+        return "すべての枠を同順位として、不足の合計が少なくなる方針で作成しました。"
+    order = "、".join(f"第{i}優先：{'・'.join(g)}" for i, g in enumerate(groups, 1))
+    return f"不足を減らす優先順位（{order}）に沿って作成しました。条件によっては優先度の高い枠にも不足が残ります。"
 
 
 # ==========================================
@@ -598,7 +635,7 @@ def add_type_cap(model, worked, forced_vars, cap, bound):
     model.Add(sum(worked) <= cap + extra)
 
 
-def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False):
+def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None):
     _, num_days = calendar.monthrange(target_year, target_month)
     days = range(1, num_days + 1)
 
@@ -860,31 +897,27 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
         r_excess = []
         for d in days:
             for s in daily_active_shifts[d]:
-                dummies[(d, s)] = relax_model.NewIntVar(0, 10, f'dummy_d{d}_{s}')
+                # 不足人数はその枠の必要人数を超えない
+                dummies[(d, s)] = relax_model.NewIntVar(0, required_count(d, s), f'dummy_d{d}_{s}')
                 overflow = relax_model.NewIntVar(0, len(doctors), f'r_over_{d}_{s}')
                 r_excess.append(overflow)
                 relax_model.Add(sum(r_shifts[(d, doc, s)] for doc in doctors) + dummies[(d, s)] == required_count(d, s) + overflow)
 
         add_common_constraints(relax_model, r_shifts)
 
-        # 不足人数を優先群ごとに最小化する。
-        # 第1群：A/B宿直・A/B日直（同順位）、第2群：外来宿直、第3群：外来日直。
-        # 各不足変数の上限は10。下位群全体の最大損失より大きい重みを使う。
-        primary_missing = [v for (d, s), v in dummies.items() if s in ("A宿直", "B宿直", "A日直", "B日直")]
-        outpatient_night_missing = [v for (d, s), v in dummies.items() if s == "外来宿直"]
-        outpatient_day_missing = [v for (d, s), v in dummies.items() if s == "外来日直"]
-        outpatient_night_weight = 10 * len(outpatient_day_missing) + 1
-        primary_weight = (
-            10 * len(outpatient_night_missing) * outpatient_night_weight
-            + 10 * len(outpatient_day_missing) + 1
-        )
+        # 不足人数を、画面で指定した優先順位の群ごとに最小化する。
+        # 優先度の低い群から順に重みを決め、上位群の重みは
+        # 「下位群すべてで起こりうる最大の損失」より大きくする。
+        # こうすると、上位群の不足を1名減らすことが、下位群の不足をいくら減らすことよりも優先される。
+        missing_score = 0
+        accumulated_bound = 0
+        for group in reversed(shortage_priority_groups(shortage_priority)):
+            weight = accumulated_bound + 1
+            group_keys = [key for key in dummies if key[1] in group]
+            missing_score += weight * sum(dummies[key] for key in group_keys)
+            accumulated_bound += weight * sum(required_count(d, s) for d, s in group_keys)
         excess_bound = len(r_excess) * len(doctors)
-        relax_model.Minimize(
-            (primary_weight * sum(primary_missing)
-             + outpatient_night_weight * sum(outpatient_night_missing)
-             + sum(outpatient_day_missing)) * (excess_bound + 1)
-            + sum(r_excess)
-        )
+        relax_model.Minimize(missing_score * (excess_bound + 1) + sum(r_excess))
 
         relax_solver = cp_model.CpSolver()
         relax_solver.parameters.max_time_in_seconds = 15.0
@@ -902,7 +935,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
                         bottlenecks.append(f"・{target_month}/{d} の「{s}」")
                         missing_by_shift[s] += val
             if bottlenecks:
-                reasons.append("A宿直・B宿直・A日直・B日直を同順位で最優先とし、次に外来宿直、最後に外来日直の不足を減らす方針で作成しました。条件によっては優先枠にも不足が残ります。")
+                reasons.append(shortage_priority_text(shortage_priority))
                 if relax_status == cp_model.FEASIBLE:
                     reasons.append("計算時間内に得られた案です。優先順位に沿った不足の最小化が完了したことまでは確認できていません。")
                 reasons.append("🚨 **以下の枠で必要人数が不足しています:**")
@@ -925,7 +958,7 @@ def _generate_shift_core(target_year, target_month, staff_df, custom_holidays, m
     return None, False, reasons, None, None
 
 
-def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False):
+def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df=None, next_month_special_holiday=False, shortage_priority=None):
     staff_df, errors = validate_staff_inputs(staff_df, target_year, target_month)
     fixed_df, fixed_errors = validate_fixed_inputs(fixed_df, staff_df.get('先生の名前', pd.Series(dtype=str)).tolist(), target_year, target_month, custom_holidays)
     errors += fixed_errors
@@ -938,7 +971,7 @@ def generate_shift(target_year, target_month, staff_df, custom_holidays, multi_s
             if not is_holiday_date(dt, target_year, target_month, custom_holidays):
                 errors.append(f'{d}日の日直増員：先に特別休日を指定してください。')
     if errors: return None, False, errors, None, None
-    result, success, warnings, past, future = _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday)
+    result, success, warnings, past, future = _generate_shift_core(target_year, target_month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
     if result is not None:
         warnings += audit_schedule(result, staff_df, target_year, target_month, custom_holidays, multi_slots_dict, past, future, next_month_special_holiday)
         success = not any('⚠️不足' in str(v) for s in ALL_SHIFT_TYPES for v in result[s])
@@ -1205,6 +1238,7 @@ for _, row in edited_multi_df.iterrows():
             multi_slots_dict[(d_val, s_val)] = int(c_val)
         except (ValueError, TypeError):
             pass
+
 
 # ==========================================
 # 2. 枠数の集計
@@ -1581,6 +1615,27 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+st.subheader("🎯 人数が足りないときに優先して埋める枠（任意）")
+st.info("全員の条件を満たす当直表が作れない場合に、どの枠から優先して埋めるかを決めます。数字が小さいほど優先し、同じ数字の枠は同順位として扱います。")
+st.caption("人数が足りている月は、この設定は結果に影響しません。初期設定は、A宿直・B宿直・A日直・B日直が1、外来宿直が2、外来日直が3です。")
+
+priority_options = list(range(1, len(ALL_SHIFT_TYPES) + 1))
+shortage_priority = {}
+priority_cols = st.columns(len(ALL_SHIFT_TYPES))
+for col, s in zip(priority_cols, NIGHT_SHIFTS + DAY_SHIFTS):
+    if f"shortage_priority_{s}" not in st.session_state:
+        st.session_state[f"shortage_priority_{s}"] = DEFAULT_SHORTAGE_PRIORITY[s]
+    shortage_priority[s] = col.selectbox(s, priority_options, key=f"shortage_priority_{s}")
+
+
+def reset_shortage_priority():
+    for s, rank in DEFAULT_SHORTAGE_PRIORITY.items():
+        st.session_state[f"shortage_priority_{s}"] = rank
+
+st.button("優先順位を初期設定に戻す", key="reset_shortage_priority", on_click=reset_shortage_priority)
+priority_order = shortage_priority_groups(shortage_priority)
+st.caption("現在の優先順位：" + " ＞ ".join("・".join(g) for g in priority_order))
+
 create_button_container = st.container(key="create_duty_action")
 st.header("3. 当直案の作成・確認")
 result_notice_container = st.container()
@@ -1592,7 +1647,7 @@ fixed_df, fixed_input_errors = validate_fixed_inputs(edited_fixed_df, staff_df['
 if fixed_input_errors:
     show_input_errors(fixed_input_errors)
     st.stop()
-current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday)
+current_signature = input_signature(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
 if 'generated_df' in st.session_state and st.session_state.get('generated_signature') != current_signature:
     for key in ['generated_df', 'past_worked_dates', 'future_worked_dates', 'generated_warnings', 'generated_signature', 'generated_year', 'generated_month']:
         st.session_state.pop(key, None)
@@ -1606,7 +1661,7 @@ if len(staff_df) > 0:
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
-                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday)
+                df_result, success, error_reasons, past_worked_dates, future_worked_dates = generate_shift(year, month, staff_df, custom_holidays, multi_slots_dict, fixed_df, next_month_special_holiday, shortage_priority)
 
                 if df_result is not None:
                     st.session_state['generated_signature'] = current_signature
