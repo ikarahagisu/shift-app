@@ -450,6 +450,225 @@ def hover_schedule_data(df, shift_columns, doctors, color_style):
 
 
 # ==========================================
+# 医師×日付の一覧表（決まった当直・当直NG・翌日PM duty）
+# ==========================================
+# 枠ごとの色（背景色, 文字色）
+MATRIX_SHIFT_COLORS = {
+    'A宿直': ('#1f3c74', '#ffffff'),
+    'B宿直': ('#6f9a37', '#ffffff'),
+    '外来宿直': ('#e3a1ab', '#3a1218'),
+    'A日直': ('#c8d4e6', '#1f2d44'),
+    'B日直': ('#d4e6bf', '#24361a'),
+    '外来日直': ('#f6d2d7', '#4a1c22'),
+}
+MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
+MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
+MATRIX_HOLIDAY_HEAD = '#c0392b'
+MATRIX_SATURDAY_HEAD = '#1f6fbf'
+
+
+def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday=False):
+    """
+    医師ごと・日ごとのマスの内容を作る。
+    優先順：決まった当直 ＞ ×（当直NG）＞ PM（翌日PM duty）。
+    """
+    num_days = len(df_result)
+    days = []
+    for d in range(1, num_days + 1):
+        dt = datetime.date(year, month, d)
+        hol = str(df_result.iloc[d - 1]['平日/休日']) == '休日'
+        kind = 'holiday' if (hol and (dt.weekday() == 6 or jpholiday.is_holiday(dt) or d in custom_holidays)) else ('saturday' if dt.weekday() == 5 else 'weekday')
+        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind})
+
+    rows = []
+    for _, staff in staff_df.iterrows():
+        name = str(staff['先生の名前'])
+        ng = parse_ng_dict(staff.get(NG_COLUMN, ''), year, month)
+        pm_days = pm_duty_weekdays(staff.get('翌日PM duty', ''))
+        cells = []
+        weekday_count = holiday_count = 0
+        for info in days:
+            d = info['day']
+            r = df_result.iloc[d - 1]
+            assigned = [s for s in RESULT_COLUMNS[2:] if name in [x.strip() for x in re.split(r'[、,]', str(r[s]))]]
+            if assigned:
+                if info['holiday']:
+                    holiday_count += len(assigned)
+                else:
+                    weekday_count += len(assigned)
+                cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0]})
+                continue
+            kind = ng.get(d)
+            pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
+            if kind == '全NG' or (kind == '宿NG' and not info['holiday']):
+                cells.append({'type': 'ng', 'text': '×'})
+            elif kind == '宿NG':
+                cells.append({'type': 'ng', 'text': '宿×'})
+            elif kind == '日NG' and info['holiday']:
+                # 日直NGに加えて翌日PM dutyで宿直も外れる日は、両方わかるように表示
+                cells.append({'type': 'ng', 'text': '日×PM' if pm else '日×'})
+            elif pm:
+                cells.append({'type': 'pm', 'text': 'PM'})
+            else:
+                cells.append({'type': 'empty', 'text': ''})
+        rows.append({
+            'name': name,
+            'pm_duty': '・'.join(WEEKDAYS_JA[i] for i in pm_days),
+            'cells': cells,
+            'weekday': weekday_count, 'holiday': holiday_count, 'total': weekday_count + holiday_count,
+        })
+    return days, rows
+
+
+def duty_matrix_html(days, rows, year, month):
+    def head_color(info):
+        return MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
+
+    css = """
+<style>
+.dm-wrap{overflow-x:auto;border:1px solid #cfd6e0;border-radius:6px;margin:4px 0 8px}
+.dm{border-collapse:collapse;font:12px system-ui,sans-serif;white-space:nowrap;background:#fff;color:#243247}
+.dm th,.dm td{border:1px solid #d8dde5;padding:0;text-align:center;height:26px}
+.dm thead th{background:#f3f5f8;font-weight:700;padding:2px 3px;min-width:30px}
+.dm .nm{position:sticky;left:0;background:#fff;text-align:left;padding:0 8px;font-weight:600;z-index:1;min-width:90px}
+.dm thead .nm{background:#f3f5f8;z-index:2}
+.dm .pmcol{padding:0 6px;color:#566174}
+.dm td.hol{background:#fdf1f1}
+.dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:11px;padding:0 2px}
+.dm .ng{color:#c0392b;font-size:14px}
+.dm .pm{background:repeating-linear-gradient(45deg,#ffe9b3 0 4px,#fff5d9 4px 8px);color:#7a4b00;font-size:10px}
+.dm .sum{padding:0 6px;font-weight:700;min-width:34px}
+.dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
+.dm-legend span{display:inline-flex;align-items:center;gap:4px}
+.dm-legend i{display:inline-block;min-width:34px;padding:1px 4px;border:1px solid #d8dde5;border-radius:3px;font-style:normal;font-weight:700;text-align:center;font-size:11px}
+</style>"""
+    legend = ['<div class="dm-legend">']
+    for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
+        legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
+    legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
+    legend.append('<span><i class="pm" style="background:repeating-linear-gradient(45deg,#ffe9b3 0 4px,#fff5d9 4px 8px);color:#7a4b00">PM</i>翌日PM dutyのため宿直を外す日</span>')
+    legend.append('</div>')
+
+    head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th>']
+    for info in days:
+        head.append(f'<th style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
+    head.append('<th class="sum">平日</th><th class="sum">休日</th><th class="sum">合計</th></tr>')
+
+    body = []
+    for row in rows:
+        tr = [f'<tr><td class="nm">{html_escape(row["name"])}</td><td class="pmcol">{html_escape(row["pm_duty"])}</td>']
+        for info, cell in zip(days, row['cells']):
+            td_class = ' class="hol"' if info['holiday'] else ''
+            if cell['type'] == 'shift':
+                bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
+                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg}">{cell["text"].replace("/", "<br>")}</div></td>')
+            elif cell['type'] == 'ng':
+                tr.append(f'<td{td_class}><div class="cell ng">{cell["text"]}</div></td>')
+            elif cell['type'] == 'pm':
+                tr.append(f'<td><div class="cell pm">PM</div></td>')
+            else:
+                tr.append(f'<td{td_class}></td>')
+        tr.append(f'<td class="sum">{row["weekday"]}</td><td class="sum">{row["holiday"]}</td><td class="sum">{row["total"]}</td></tr>')
+        body.append(''.join(tr))
+    return css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
+
+
+def html_escape(text):
+    import html
+    return html.escape(str(text))
+
+
+def duty_matrix_xlsx(days, rows, year, month):
+    """一覧表をExcelファイル（印刷向けの書式付き）にする。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"{year}年{month}月"
+    thin = Side(style='thin', color='B8C0CC')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    def fill(color):
+        return PatternFill('solid', fgColor=color.lstrip('#'))
+
+    ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表").font = Font(bold=True, size=14)
+    header_row, first_day_col = 3, 3
+    ws.cell(row=header_row, column=1, value='名前')
+    ws.cell(row=header_row, column=2, value='翌日PM duty')
+    for i, info in enumerate(days):
+        c = ws.cell(row=header_row, column=first_day_col + i, value=f"{info['day']}\n{info['weekday']}")
+        color = MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
+        c.font = Font(bold=True, color=color.lstrip('#'))
+    sum_col = first_day_col + len(days)
+    for j, label in enumerate(['平日', '休日', '合計']):
+        ws.cell(row=header_row, column=sum_col + j, value=label)
+    for col in range(1, sum_col + 3):
+        c = ws.cell(row=header_row, column=col)
+        c.alignment = center; c.border = border; c.fill = fill('#E6EBF2')
+        if c.font is None or not c.font.bold:
+            c.font = Font(bold=True)
+
+    for r_idx, row in enumerate(rows, header_row + 1):
+        ws.cell(row=r_idx, column=1, value=row['name']).font = Font(bold=True)
+        ws.cell(row=r_idx, column=2, value=row['pm_duty'])
+        for i, (info, cell) in enumerate(zip(days, row['cells'])):
+            c = ws.cell(row=r_idx, column=first_day_col + i, value=cell['text'].replace('/', '\n') or None)
+            if cell['type'] == 'shift':
+                bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#EEEEEE', '#000000'))
+                c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
+            elif cell['type'] == 'ng':
+                c.font = Font(bold=True, color='C0392B')
+                if info['holiday']:
+                    c.fill = fill('#FDF1F1')
+            elif cell['type'] == 'pm':
+                c.fill = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
+                c.font = Font(bold=True, size=8, color='7A4B00')
+            elif info['holiday']:
+                c.fill = fill('#FDF1F1')
+        for j, key in enumerate(['weekday', 'holiday', 'total']):
+            ws.cell(row=r_idx, column=sum_col + j, value=row[key]).font = Font(bold=True)
+        for col in range(1, sum_col + 3):
+            c = ws.cell(row=r_idx, column=col)
+            c.border = border
+            c.alignment = center if col > 1 else Alignment(vertical='center')
+        # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
+        ws.row_dimensions[r_idx].height = 30 if any('/' in cell['text'] for cell in row['cells']) else 20
+
+    legend_row = header_row + len(rows) + 2
+    ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
+    items = [(s, bg, fg) for s, (bg, fg) in MATRIX_SHIFT_COLORS.items()]
+    for k, (label, bg, fg) in enumerate(items):
+        c = ws.cell(row=legend_row, column=2 + k * 2, value=label)
+        c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
+    ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
+    ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
+    pm = ws.cell(row=legend_row + 2, column=2, value='PM')
+    pm.fill = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9'); pm.font = Font(bold=True, size=8, color='7A4B00'); pm.alignment = center
+    ws.cell(row=legend_row + 2, column=3, value='翌日PM dutyのため宿直を外す日')
+
+    ws.column_dimensions['A'].width = 14
+    ws.column_dimensions['B'].width = 9
+    for i in range(len(days)):
+        ws.column_dimensions[get_column_letter(first_day_col + i)].width = 5.2
+    for j in range(3):
+        ws.column_dimensions[get_column_letter(sum_col + j)].width = 5
+    ws.row_dimensions[header_row].height = 30
+    ws.freeze_panes = ws.cell(row=header_row + 1, column=first_day_col)
+    # A3横向き・1ページに収めて印刷
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize = ws.PAPERSIZE_A3
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+# ==========================================
 # 入力チェック
 # ==========================================
 def validate_staff_inputs(df, year, month):
@@ -1830,6 +2049,21 @@ if len(staff_df) > 0:
 
         summary_height = len(df_summary) * 35 + 40
         st.dataframe(styled_summary, use_container_width=True, height=summary_height)
+
+        st.divider()
+        st.subheader("🗓️ 医師別の当直一覧（決まった当直・当直NG・PM duty）")
+        st.caption("医師ごとに1行で、決まった当直、当直NG（×）、翌日PM dutyのため宿直を外す日（PM）を表示します。当直が決まった日は、NGやPMより当直を優先して表示します。")
+        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
+        try:
+            st.download_button(
+                label="📥 この一覧をExcelでダウンロード（印刷用）",
+                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month),
+                file_name=f"当直一覧_{year}年{month}月.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        except ImportError:
+            st.caption("Excelでダウンロードするには、requirements.txt に openpyxl を追加してください。")
 
 else:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
