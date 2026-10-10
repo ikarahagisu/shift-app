@@ -551,7 +551,6 @@ def duty_matrix_html(days, rows, year, month):
 .dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
 .dm tr.short.first td{border-top:2px solid #c0392b}
 .dm tr.short td.nm{color:#c0392b}
-.dm .cell.miss{outline:2px solid #c0392b;outline-offset:-2px;font-size:10px}
 .dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
@@ -563,7 +562,7 @@ def duty_matrix_html(days, rows, year, month):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
-    legend.append('<span><i style="outline:2px solid #c0392b;outline-offset:-2px">未定</i>当直が決まっていない枠（枠の色で表示）</span>')
+    legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
     legend.append('</div>')
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th>']
@@ -592,15 +591,15 @@ def duty_matrix_html(days, rows, year, month):
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     for k, slot in enumerate(shortage_slots(days)):
         first = ' first' if k == 0 else ''
-        tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td class="pmcol" style="font-weight:700">{slot}</td>']
+        tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td></td>']
         bg, fg = MATRIX_SHIFT_COLORS[slot]
         slot_total = 0
         for info in days:
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
             if count:
                 slot_total += 1
-                label = '未定' if count == 1 else f'未定×{count}'
-                tr.append(f'<td><div class="cell miss" style="background:{bg};color:{fg}">{label}</div></td>')
+                label = slot if count == 1 else f'{slot}×{count}'
+                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
             else:
                 tr.append('<td></td>')
         tr.append(f'<td class="sum" colspan="3" style="color:#c0392b">{slot_total}枠</td></tr>')
@@ -680,7 +679,6 @@ def duty_matrix_xlsx(days, rows, year, month):
         last_row += 1
         bg, fg = MATRIX_SHIFT_COLORS[slot]
         ws.cell(row=last_row, column=1, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
-        ws.cell(row=last_row, column=2, value=slot).font = Font(bold=True)
         slot_total = 0
         for i, info in enumerate(days):
             count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
@@ -688,9 +686,8 @@ def duty_matrix_xlsx(days, rows, year, month):
             c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             if count:
                 slot_total += 1
-                c.value = '未定' if count == 1 else f'未定×{count}'
+                c.value = slot if count == 1 else f'{slot}×{count}'
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
-                c.border = Border(left=red, right=red, top=red, bottom=red)
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = center
         ws.cell(row=last_row, column=sum_col + 2, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
@@ -698,7 +695,7 @@ def duty_matrix_xlsx(days, rows, year, month):
             c = ws.cell(row=last_row, column=col)
             c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             c.alignment = center if col > 1 else Alignment(vertical='center')
-        ws.row_dimensions[last_row].height = 20
+        ws.row_dimensions[last_row].height = 24
 
     legend_row = last_row + 2
     ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
@@ -710,10 +707,8 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
     ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
-    miss = ws.cell(row=legend_row + 3, column=2, value='未定')
-    red_side = Side(style='medium', color='C0392B')
-    miss.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side); miss.font = Font(bold=True, size=8); miss.alignment = center
-    ws.cell(row=legend_row + 3, column=3, value='当直が決まっていない枠（枠の色で表示）')
+    ws.cell(row=legend_row + 3, column=2, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
+    ws.cell(row=legend_row + 3, column=3, value='赤線の下：当直が決まっていない枠')
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
@@ -2123,7 +2118,7 @@ if len(staff_df) > 0:
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
-            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下の「未決定」の行で、枠ごとの色で確認できます。")
+            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
         try:
             st.download_button(
                 label="📥 この一覧をExcelでダウンロード（印刷用）",
