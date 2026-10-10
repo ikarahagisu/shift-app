@@ -483,7 +483,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         for s in RESULT_COLUMNS[2:]:
             m = re.search(r'⚠️不足\((\d+)名\)', str(df_result.iloc[d - 1][s]))
             if m:
-                shortage.append(s if m.group(1) == '1' else f"{s}×{m.group(1)}")
+                shortage.append({'slot': s, 'count': int(m.group(1))})
         days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage})
 
     rows = []
@@ -526,6 +526,12 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
     return days, rows
 
 
+def shortage_slots(days):
+    """不足がある枠を、表の列と同じ順で返す。"""
+    used = {x['slot'] for info in days for x in info['shortage']}
+    return [s for s in RESULT_COLUMNS[2:] if s in used]
+
+
 def duty_matrix_html(days, rows, year, month):
     def head_color(info):
         return MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
@@ -543,9 +549,9 @@ def duty_matrix_html(days, rows, year, month):
 .dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:11px;padding:0 2px}
 .dm .ng{color:#c0392b;font-size:14px}
 .dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
-.dm tr.short td{background:#fff;border-top:2px solid #c0392b}
-.dm tr.short td.miss{background:#c0392b;color:#fff;font-weight:700;font-size:10px;line-height:1.2;padding:2px 1px}
+.dm tr.short.first td{border-top:2px solid #c0392b}
 .dm tr.short td.nm{color:#c0392b}
+.dm .cell.miss{outline:2px solid #c0392b;outline-offset:-2px;font-size:10px}
 .dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
@@ -557,7 +563,7 @@ def duty_matrix_html(days, rows, year, month):
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
-    legend.append('<span><i style="background:#c0392b;color:#fff">枠名</i>当直が決まっていない枠</span>')
+    legend.append('<span><i style="outline:2px solid #c0392b;outline-offset:-2px">未定</i>当直が決まっていない枠（枠の色で表示）</span>')
     legend.append('</div>')
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th>']
@@ -583,15 +589,21 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append(f'<td{td_class}></td>')
         tr.append(f'<td class="sum">{row["weekday"]}</td><td class="sum">{row["holiday"]}</td><td class="sum">{row["total"]}</td></tr>')
         body.append(''.join(tr))
-    if any(info['shortage'] for info in days):
-        tr = ['<tr class="short"><td class="nm">⚠️ 未決定の枠</td><td></td>']
+    # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
+    for k, slot in enumerate(shortage_slots(days)):
+        first = ' first' if k == 0 else ''
+        tr = [f'<tr class="short{first}"><td class="nm">⚠️ 未決定</td><td class="pmcol" style="font-weight:700">{slot}</td>']
+        bg, fg = MATRIX_SHIFT_COLORS[slot]
+        slot_total = 0
         for info in days:
-            if info['shortage']:
-                tr.append(f'<td class="miss">{"<br>".join(html_escape(x) for x in info["shortage"])}</td>')
+            count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
+            if count:
+                slot_total += 1
+                label = '未定' if count == 1 else f'未定×{count}'
+                tr.append(f'<td><div class="cell miss" style="background:{bg};color:{fg}">{label}</div></td>')
             else:
                 tr.append('<td></td>')
-        total_missing = sum(len(info['shortage']) for info in days)
-        tr.append(f'<td class="sum" colspan="3" style="color:#c0392b">{total_missing}枠</td></tr>')
+        tr.append(f'<td class="sum" colspan="3" style="color:#c0392b">{slot_total}枠</td></tr>')
         body.append(''.join(tr))
     return css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
@@ -661,23 +673,32 @@ def duty_matrix_xlsx(days, rows, year, month):
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
         ws.row_dimensions[r_idx].height = 30 if any('/' in cell['text'] for cell in row['cells']) else 20
 
-    # 当直が決まっていない枠の行
+    # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     last_row = header_row + len(rows)
-    if any(info['shortage'] for info in days):
+    red = Side(style='medium', color='C0392B')
+    for k, slot in enumerate(shortage_slots(days)):
         last_row += 1
-        ws.cell(row=last_row, column=1, value='⚠️ 未決定の枠').font = Font(bold=True, color='C0392B')
+        bg, fg = MATRIX_SHIFT_COLORS[slot]
+        ws.cell(row=last_row, column=1, value='⚠️ 未決定').font = Font(bold=True, color='C0392B')
+        ws.cell(row=last_row, column=2, value=slot).font = Font(bold=True)
+        slot_total = 0
         for i, info in enumerate(days):
-            c = ws.cell(row=last_row, column=first_day_col + i, value='\n'.join(info['shortage']) or None)
-            if info['shortage']:
-                c.fill = fill('#C0392B'); c.font = Font(bold=True, size=7, color='FFFFFF')
+            count = sum(x['count'] for x in info['shortage'] if x['slot'] == slot)
+            c = ws.cell(row=last_row, column=first_day_col + i)
+            c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
+            if count:
+                slot_total += 1
+                c.value = '未定' if count == 1 else f'未定×{count}'
+                c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
+                c.border = Border(left=red, right=red, top=red, bottom=red)
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
-        total_missing = sum(len(info['shortage']) for info in days)
-        ws.cell(row=last_row, column=sum_col + 2, value=f"{total_missing}枠").font = Font(bold=True, color='C0392B')
-        for col in range(1, sum_col + 3):
+            c.alignment = center
+        ws.cell(row=last_row, column=sum_col + 2, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
+        for col in list(range(1, first_day_col)) + list(range(sum_col, sum_col + 3)):
             c = ws.cell(row=last_row, column=col)
-            c.border = Border(left=thin, right=thin, bottom=thin, top=Side(style='medium', color='C0392B'))
+            c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             c.alignment = center if col > 1 else Alignment(vertical='center')
-        ws.row_dimensions[last_row].height = 12 + 10 * max(len(info['shortage']) for info in days)
+        ws.row_dimensions[last_row].height = 20
 
     legend_row = last_row + 2
     ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
@@ -689,9 +710,10 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
     ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
-    miss = ws.cell(row=legend_row + 3, column=2, value='枠名')
-    miss.fill = fill('#C0392B'); miss.font = Font(bold=True, size=8, color='FFFFFF'); miss.alignment = center
-    ws.cell(row=legend_row + 3, column=3, value='当直が決まっていない枠')
+    miss = ws.cell(row=legend_row + 3, column=2, value='未定')
+    red_side = Side(style='medium', color='C0392B')
+    miss.border = Border(left=red_side, right=red_side, top=red_side, bottom=red_side); miss.font = Font(bold=True, size=8); miss.alignment = center
+    ws.cell(row=legend_row + 3, column=3, value='当直が決まっていない枠（枠の色で表示）')
 
     ws.column_dimensions['A'].width = 14
     ws.column_dimensions['B'].width = 12
@@ -2101,7 +2123,7 @@ if len(staff_df) > 0:
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
-            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下の「未決定の枠」の行で確認できます。")
+            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下の「未決定」の行で、枠ごとの色で確認できます。")
         try:
             st.download_button(
                 label="📥 この一覧をExcelでダウンロード（印刷用）",
