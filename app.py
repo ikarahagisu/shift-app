@@ -464,10 +464,10 @@ MATRIX_SHIFT_COLORS = {
 MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
 MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
 MATRIX_HOLIDAY_HEAD = '#c0392b'
-# 右端の回数の列（病棟・外来・平日・休日・合計）
+# 右端の回数の列（宿直・日直・病棟・外来・平日・休日・合計）
 MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
 MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
-MATRIX_COUNT_COLUMNS = [('ward', '病棟'), ('outpatient', '外来'), ('weekday', '平日'), ('holiday', '休日'), ('total', '合計')]
+MATRIX_COUNT_COLUMNS = [('night', '宿直'), ('day', '日直'), ('ward', '病棟'), ('outpatient', '外来'), ('weekday', '平日'), ('holiday', '休日'), ('total', '合計')]
 MATRIX_SATURDAY_HEAD = '#1f6fbf'
 
 
@@ -496,7 +496,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         ng = parse_ng_dict(staff.get(NG_COLUMN, ''), year, month)
         pm_days = pm_duty_weekdays(staff.get('翌日PM duty', ''))
         cells = []
-        weekday_count = holiday_count = ward_count = outpatient_count = 0
+        weekday_count = holiday_count = ward_count = outpatient_count = night_count = day_count = 0
         for info in days:
             d = info['day']
             r = df_result.iloc[d - 1]
@@ -506,6 +506,8 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                     holiday_count += len(assigned)
                 else:
                     weekday_count += len(assigned)
+                night_count += sum(1 for s in assigned if s in NIGHT_SHIFTS)
+                day_count += sum(1 for s in assigned if s in DAY_SHIFTS)
                 ward_count += sum(1 for s in assigned if s in MATRIX_WARD_SHIFTS)
                 outpatient_count += sum(1 for s in assigned if s in MATRIX_OUTPATIENT_SHIFTS)
                 cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0]})
@@ -527,7 +529,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             'name': name,
             'pm_duty': '・'.join(WEEKDAYS_JA[i] for i in pm_days),
             'cells': cells,
-            'ward': ward_count, 'outpatient': outpatient_count,
+            'night': night_count, 'day': day_count, 'ward': ward_count, 'outpatient': outpatient_count,
             'weekday': weekday_count, 'holiday': holiday_count, 'total': weekday_count + holiday_count,
         })
     return days, rows
