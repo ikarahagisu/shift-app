@@ -478,7 +478,13 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         dt = datetime.date(year, month, d)
         hol = str(df_result.iloc[d - 1]['平日/休日']) == '休日'
         kind = 'holiday' if (hol and (dt.weekday() == 6 or jpholiday.is_holiday(dt) or d in custom_holidays)) else ('saturday' if dt.weekday() == 5 else 'weekday')
-        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind})
+        # 当直が決まっていない枠（⚠️不足）
+        shortage = []
+        for s in RESULT_COLUMNS[2:]:
+            m = re.search(r'⚠️不足\((\d+)名\)', str(df_result.iloc[d - 1][s]))
+            if m:
+                shortage.append(s if m.group(1) == '1' else f"{s}×{m.group(1)}")
+        days.append({'day': d, 'weekday': WEEKDAYS_JA[dt.weekday()], 'holiday': hol, 'kind': kind, 'shortage': shortage})
 
     rows = []
     for _, staff in staff_df.iterrows():
@@ -506,9 +512,9 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 cells.append({'type': 'ng', 'text': '宿×'})
             elif kind == '日NG' and info['holiday']:
                 # 日直NGに加えて翌日PM dutyで宿直も外れる日は、両方わかるように表示
-                cells.append({'type': 'ng', 'text': '日×PM' if pm else '日×'})
+                cells.append({'type': 'ng', 'text': '日×', 'pm': pm})
             elif pm:
-                cells.append({'type': 'pm', 'text': 'PM'})
+                cells.append({'type': 'pm', 'text': ''})
             else:
                 cells.append({'type': 'empty', 'text': ''})
         rows.append({
@@ -536,7 +542,11 @@ def duty_matrix_html(days, rows, year, month):
 .dm td.hol{background:#fdf1f1}
 .dm .cell{display:flex;align-items:center;justify-content:center;height:100%;min-height:26px;font-weight:700;font-size:11px;padding:0 2px}
 .dm .ng{color:#c0392b;font-size:14px}
-.dm .pm{background:repeating-linear-gradient(45deg,#ffe9b3 0 4px,#fff5d9 4px 8px);color:#7a4b00;font-size:10px}
+.dm .pm{background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)}
+.dm tr.short td{background:#fff;border-top:2px solid #c0392b}
+.dm tr.short td.miss{background:#c0392b;color:#fff;font-weight:700;font-size:10px;line-height:1.2;padding:2px 1px}
+.dm tr.short td.nm{color:#c0392b}
+.dm th.miss{background:#fde2e0}
 .dm .sum{padding:0 6px;font-weight:700;min-width:34px}
 .dm-legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;margin:2px 0 6px;color:#243247}
 .dm-legend span{display:inline-flex;align-items:center;gap:4px}
@@ -546,12 +556,14 @@ def duty_matrix_html(days, rows, year, month):
     for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
-    legend.append('<span><i class="pm" style="background:repeating-linear-gradient(45deg,#ffe9b3 0 4px,#fff5d9 4px 8px);color:#7a4b00">PM</i>翌日PM dutyのため宿直を外す日</span>')
+    legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
+    legend.append('<span><i style="background:#c0392b;color:#fff">枠名</i>当直が決まっていない枠</span>')
     legend.append('</div>')
 
     head = ['<tr><th class="nm">名前</th><th class="pmcol">翌日PM duty</th>']
     for info in days:
-        head.append(f'<th style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
+        miss_class = ' class="miss"' if info['shortage'] else ''
+        head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
     head.append('<th class="sum">平日</th><th class="sum">休日</th><th class="sum">合計</th></tr>')
 
     body = []
@@ -563,12 +575,23 @@ def duty_matrix_html(days, rows, year, month):
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
                 tr.append(f'<td><div class="cell" style="background:{bg};color:{fg}">{cell["text"].replace("/", "<br>")}</div></td>')
             elif cell['type'] == 'ng':
-                tr.append(f'<td{td_class}><div class="cell ng">{cell["text"]}</div></td>')
+                pm_class = ' pm' if cell.get('pm') else ''
+                tr.append(f'<td{td_class}><div class="cell ng{pm_class}">{cell["text"]}</div></td>')
             elif cell['type'] == 'pm':
-                tr.append(f'<td><div class="cell pm">PM</div></td>')
+                tr.append('<td><div class="cell pm"></div></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
         tr.append(f'<td class="sum">{row["weekday"]}</td><td class="sum">{row["holiday"]}</td><td class="sum">{row["total"]}</td></tr>')
+        body.append(''.join(tr))
+    if any(info['shortage'] for info in days):
+        tr = ['<tr class="short"><td class="nm">⚠️ 未決定の枠</td><td></td>']
+        for info in days:
+            if info['shortage']:
+                tr.append(f'<td class="miss">{"<br>".join(html_escape(x) for x in info["shortage"])}</td>')
+            else:
+                tr.append('<td></td>')
+        total_missing = sum(len(info['shortage']) for info in days)
+        tr.append(f'<td class="sum" colspan="3" style="color:#c0392b">{total_missing}枠</td></tr>')
         body.append(''.join(tr))
     return css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
@@ -592,6 +615,7 @@ def duty_matrix_xlsx(days, rows, year, month):
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     def fill(color):
         return PatternFill('solid', fgColor=color.lstrip('#'))
+    PM_FILL = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
 
     ws.cell(row=1, column=1, value=f"{year}年{month}月分 当直表").font = Font(bold=True, size=14)
     header_row, first_day_col = 3, 3
@@ -620,11 +644,12 @@ def duty_matrix_xlsx(days, rows, year, month):
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
             elif cell['type'] == 'ng':
                 c.font = Font(bold=True, color='C0392B')
-                if info['holiday']:
+                if cell.get('pm'):
+                    c.fill = PM_FILL
+                elif info['holiday']:
                     c.fill = fill('#FDF1F1')
             elif cell['type'] == 'pm':
-                c.fill = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9')
-                c.font = Font(bold=True, size=8, color='7A4B00')
+                c.fill = PM_FILL
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
         for j, key in enumerate(['weekday', 'holiday', 'total']):
@@ -636,7 +661,25 @@ def duty_matrix_xlsx(days, rows, year, month):
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
         ws.row_dimensions[r_idx].height = 30 if any('/' in cell['text'] for cell in row['cells']) else 20
 
-    legend_row = header_row + len(rows) + 2
+    # 当直が決まっていない枠の行
+    last_row = header_row + len(rows)
+    if any(info['shortage'] for info in days):
+        last_row += 1
+        ws.cell(row=last_row, column=1, value='⚠️ 未決定の枠').font = Font(bold=True, color='C0392B')
+        for i, info in enumerate(days):
+            c = ws.cell(row=last_row, column=first_day_col + i, value='\n'.join(info['shortage']) or None)
+            if info['shortage']:
+                c.fill = fill('#C0392B'); c.font = Font(bold=True, size=7, color='FFFFFF')
+                ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
+        total_missing = sum(len(info['shortage']) for info in days)
+        ws.cell(row=last_row, column=sum_col + 2, value=f"{total_missing}枠").font = Font(bold=True, color='C0392B')
+        for col in range(1, sum_col + 3):
+            c = ws.cell(row=last_row, column=col)
+            c.border = Border(left=thin, right=thin, bottom=thin, top=Side(style='medium', color='C0392B'))
+            c.alignment = center if col > 1 else Alignment(vertical='center')
+        ws.row_dimensions[last_row].height = 12 + 10 * max(len(info['shortage']) for info in days)
+
+    legend_row = last_row + 2
     ws.cell(row=legend_row, column=1, value='凡例').font = Font(bold=True)
     items = [(s, bg, fg) for s, (bg, fg) in MATRIX_SHIFT_COLORS.items()]
     for k, (label, bg, fg) in enumerate(items):
@@ -644,12 +687,14 @@ def duty_matrix_xlsx(days, rows, year, month):
         c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
     ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
-    pm = ws.cell(row=legend_row + 2, column=2, value='PM')
-    pm.fill = PatternFill('lightUp', fgColor='E0A800', bgColor='FFF5D9'); pm.font = Font(bold=True, size=8, color='7A4B00'); pm.alignment = center
-    ws.cell(row=legend_row + 2, column=3, value='翌日PM dutyのため宿直を外す日')
+    ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
+    ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
+    miss = ws.cell(row=legend_row + 3, column=2, value='枠名')
+    miss.fill = fill('#C0392B'); miss.font = Font(bold=True, size=8, color='FFFFFF'); miss.alignment = center
+    ws.cell(row=legend_row + 3, column=3, value='当直が決まっていない枠')
 
     ws.column_dimensions['A'].width = 14
-    ws.column_dimensions['B'].width = 9
+    ws.column_dimensions['B'].width = 12
     for i in range(len(days)):
         ws.column_dimensions[get_column_letter(first_day_col + i)].width = 5.2
     for j in range(3):
@@ -2051,19 +2096,23 @@ if len(staff_df) > 0:
         st.dataframe(styled_summary, use_container_width=True, height=summary_height)
 
         st.divider()
-        st.subheader("🗓️ 医師別の当直一覧（決まった当直・当直NG・PM duty）")
-        st.caption("医師ごとに1行で、決まった当直、当直NG（×）、翌日PM dutyのため宿直を外す日（PM）を表示します。当直が決まった日は、NGやPMより当直を優先して表示します。")
+        st.subheader("🗓️ 医師別の当直一覧")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。当直が決まった日は当直を優先して表示します。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
-        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
+        missing_total = sum(len(info['shortage']) for info in matrix_days)
+        if missing_total:
+            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下の「未決定の枠」の行で確認できます。")
         try:
             st.download_button(
                 label="📥 この一覧をExcelでダウンロード（印刷用）",
                 data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month),
                 file_name=f"当直一覧_{year}年{month}月.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
             )
         except ImportError:
-            st.caption("Excelでダウンロードするには、requirements.txt に openpyxl を追加してください。")
+            st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
 
 else:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
