@@ -468,6 +468,14 @@ MATRIX_HOLIDAY_HEAD = '#c0392b'
 MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
 MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
 MATRIX_COUNT_COLUMNS = [('night', '宿直'), ('day', '日直'), ('ward', '病棟'), ('outpatient', '外来'), ('weekday', '平日'), ('holiday', '休日'), ('total', '合計')]
+# 2列ずつのセットがひと目でわかるように色分けする（見出しの色, 数字欄の色）
+MATRIX_COUNT_GROUP_COLORS = {
+    'night': ('#cfe0f5', '#eef4fc'), 'day': ('#cfe0f5', '#eef4fc'),            # 宿直・日直：青
+    'ward': ('#d5ead0', '#eef7ec'), 'outpatient': ('#d5ead0', '#eef7ec'),      # 病棟・外来：緑
+    'weekday': ('#f8dcc4', '#fdf1e7'), 'holiday': ('#f8dcc4', '#fdf1e7'),      # 平日・休日：橙
+    'total': ('#d9dde3', '#f3f4f6'),                                           # 合計：灰
+}
+MATRIX_COUNT_GROUP_STARTS = ('night', 'ward', 'weekday', 'total')  # セットの左端（区切り線を太くする）
 MATRIX_SATURDAY_HEAD = '#1f6fbf'
 
 
@@ -541,6 +549,14 @@ def shortage_slots(days):
     return [s for s in RESULT_COLUMNS[2:] if s in used]
 
 
+def count_cell_css(key, is_head):
+    head_bg, body_bg = MATRIX_COUNT_GROUP_COLORS[key]
+    css = f"background:{head_bg if is_head else body_bg};"
+    if key in MATRIX_COUNT_GROUP_STARTS:
+        css += "border-left:2px solid #7b8698;"
+    return css
+
+
 def duty_matrix_html(days, rows, year, month):
     def head_color(info):
         return MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
@@ -578,7 +594,7 @@ def duty_matrix_html(days, rows, year, month):
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
         head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
-    head.append(''.join(f'<th class="sum">{label}</th>' for _, label in MATRIX_COUNT_COLUMNS) + '</tr>')
+    head.append(''.join(f'<th class="sum" style="{count_cell_css(key, True)}">{label}</th>' for key, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
     body = []
     for row in rows:
@@ -595,7 +611,7 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append('<td><div class="cell pm"></div></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
-        tr.append(''.join(f'<td class="sum">{row[key]}</td>' for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
+        tr.append(''.join(f'<td class="sum" style="{count_cell_css(key, False)}">{row[key]}</td>' for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
         body.append(''.join(tr))
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     for k, slot in enumerate(shortage_slots(days)):
@@ -654,6 +670,16 @@ def duty_matrix_xlsx(days, rows, year, month):
         c.alignment = center; c.border = border; c.fill = fill('#E6EBF2')
         if c.font is None or not c.font.bold:
             c.font = Font(bold=True)
+    group_side = Side(style='medium', color='7B8698')
+
+    def style_count_cell(c, key, is_head):
+        head_bg, body_bg = MATRIX_COUNT_GROUP_COLORS[key]
+        c.fill = fill(head_bg if is_head else body_bg)
+        if key in MATRIX_COUNT_GROUP_STARTS:
+            c.border = Border(left=group_side, right=thin, top=c.border.top, bottom=c.border.bottom)
+
+    for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
+        style_count_cell(ws.cell(row=header_row, column=sum_col + j), key, True)
 
     for r_idx, row in enumerate(rows, header_row + 1):
         ws.cell(row=r_idx, column=1, value=row['name']).font = Font(bold=True)
@@ -679,6 +705,8 @@ def duty_matrix_xlsx(days, rows, year, month):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
+        for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
+            style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
         ws.row_dimensions[r_idx].height = 30 if any('/' in cell['text'] for cell in row['cells']) else 20
 
