@@ -464,6 +464,10 @@ MATRIX_SHIFT_COLORS = {
 MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
 MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
 MATRIX_HOLIDAY_HEAD = '#c0392b'
+# 右端の回数の列（病棟・外来・平日・休日・合計）
+MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
+MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
+MATRIX_COUNT_COLUMNS = [('ward', '病棟'), ('outpatient', '外来'), ('weekday', '平日'), ('holiday', '休日'), ('total', '合計')]
 MATRIX_SATURDAY_HEAD = '#1f6fbf'
 
 
@@ -492,7 +496,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         ng = parse_ng_dict(staff.get(NG_COLUMN, ''), year, month)
         pm_days = pm_duty_weekdays(staff.get('翌日PM duty', ''))
         cells = []
-        weekday_count = holiday_count = 0
+        weekday_count = holiday_count = ward_count = outpatient_count = 0
         for info in days:
             d = info['day']
             r = df_result.iloc[d - 1]
@@ -502,6 +506,8 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                     holiday_count += len(assigned)
                 else:
                     weekday_count += len(assigned)
+                ward_count += sum(1 for s in assigned if s in MATRIX_WARD_SHIFTS)
+                outpatient_count += sum(1 for s in assigned if s in MATRIX_OUTPATIENT_SHIFTS)
                 cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0]})
                 continue
             kind = ng.get(d)
@@ -521,6 +527,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
             'name': name,
             'pm_duty': '・'.join(WEEKDAYS_JA[i] for i in pm_days),
             'cells': cells,
+            'ward': ward_count, 'outpatient': outpatient_count,
             'weekday': weekday_count, 'holiday': holiday_count, 'total': weekday_count + holiday_count,
         })
     return days, rows
@@ -569,7 +576,7 @@ def duty_matrix_html(days, rows, year, month):
     for info in days:
         miss_class = ' class="miss"' if info['shortage'] else ''
         head.append(f'<th{miss_class} style="color:{head_color(info)}">{info["day"]}<br>{info["weekday"]}</th>')
-    head.append('<th class="sum">平日</th><th class="sum">休日</th><th class="sum">合計</th></tr>')
+    head.append(''.join(f'<th class="sum">{label}</th>' for _, label in MATRIX_COUNT_COLUMNS) + '</tr>')
 
     body = []
     for row in rows:
@@ -586,7 +593,7 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append('<td><div class="cell pm"></div></td>')
             else:
                 tr.append(f'<td{td_class}></td>')
-        tr.append(f'<td class="sum">{row["weekday"]}</td><td class="sum">{row["holiday"]}</td><td class="sum">{row["total"]}</td></tr>')
+        tr.append(''.join(f'<td class="sum">{row[key]}</td>' for key, _ in MATRIX_COUNT_COLUMNS) + '</tr>')
         body.append(''.join(tr))
     # 当直が決まっていない枠：枠ごとに1行、その枠の色で表示
     for k, slot in enumerate(shortage_slots(days)):
@@ -602,7 +609,7 @@ def duty_matrix_html(days, rows, year, month):
                 tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};white-space:normal;line-height:1.15;font-size:10px">{label}</div></td>')
             else:
                 tr.append('<td></td>')
-        tr.append(f'<td class="sum" colspan="3" style="color:#c0392b">{slot_total}枠</td></tr>')
+        tr.append(f'<td class="sum" colspan="{len(MATRIX_COUNT_COLUMNS)}" style="color:#c0392b">{slot_total}枠</td></tr>')
         body.append(''.join(tr))
     return css + ''.join(legend) + f'<div class="dm-wrap"><table class="dm"><thead>{"".join(head)}</thead><tbody>{"".join(body)}</tbody></table></div>'
 
@@ -637,9 +644,10 @@ def duty_matrix_xlsx(days, rows, year, month):
         color = MATRIX_HOLIDAY_HEAD if info['kind'] == 'holiday' else (MATRIX_SATURDAY_HEAD if info['kind'] == 'saturday' else '#243247')
         c.font = Font(bold=True, color=color.lstrip('#'))
     sum_col = first_day_col + len(days)
-    for j, label in enumerate(['平日', '休日', '合計']):
+    n_counts = len(MATRIX_COUNT_COLUMNS)
+    for j, (_, label) in enumerate(MATRIX_COUNT_COLUMNS):
         ws.cell(row=header_row, column=sum_col + j, value=label)
-    for col in range(1, sum_col + 3):
+    for col in range(1, sum_col + n_counts):
         c = ws.cell(row=header_row, column=col)
         c.alignment = center; c.border = border; c.fill = fill('#E6EBF2')
         if c.font is None or not c.font.bold:
@@ -663,9 +671,9 @@ def duty_matrix_xlsx(days, rows, year, month):
                 c.fill = PM_FILL
             elif info['holiday']:
                 c.fill = fill('#FDF1F1')
-        for j, key in enumerate(['weekday', 'holiday', 'total']):
+        for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             ws.cell(row=r_idx, column=sum_col + j, value=row[key]).font = Font(bold=True)
-        for col in range(1, sum_col + 3):
+        for col in range(1, sum_col + n_counts):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
@@ -690,8 +698,8 @@ def duty_matrix_xlsx(days, rows, year, month):
                 c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#'))
                 ws.cell(row=header_row, column=first_day_col + i).fill = fill('#FDE2E0')
             c.alignment = center
-        ws.cell(row=last_row, column=sum_col + 2, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
-        for col in list(range(1, first_day_col)) + list(range(sum_col, sum_col + 3)):
+        ws.cell(row=last_row, column=sum_col + n_counts - 1, value=f"{slot_total}枠").font = Font(bold=True, color='C0392B')
+        for col in list(range(1, first_day_col)) + list(range(sum_col, sum_col + n_counts)):
             c = ws.cell(row=last_row, column=col)
             c.border = Border(left=thin, right=thin, bottom=thin, top=red if k == 0 else thin)
             c.alignment = center if col > 1 else Alignment(vertical='center')
@@ -714,7 +722,7 @@ def duty_matrix_xlsx(days, rows, year, month):
     ws.column_dimensions['B'].width = 12
     for i in range(len(days)):
         ws.column_dimensions[get_column_letter(first_day_col + i)].width = 5.2
-    for j in range(3):
+    for j in range(n_counts):
         ws.column_dimensions[get_column_letter(sum_col + j)].width = 5
     ws.row_dimensions[header_row].height = 30
     ws.freeze_panes = ws.cell(row=header_row + 1, column=first_day_col)
