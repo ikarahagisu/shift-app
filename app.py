@@ -2059,6 +2059,25 @@ if len(staff_df) > 0:
         def split_names(value):
             return [x.strip() for x in re.split(r'[、,]', str(value))]
 
+        st.subheader("🗓️ 医師別の当直一覧")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は★を付けて黒い太枠で囲みます。")
+        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
+        missing_total = sum(len(info['shortage']) for info in matrix_days)
+        if missing_total:
+            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
+        try:
+            st.download_button(
+                label="📥 この一覧をExcelでダウンロード（印刷用）",
+                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month),
+                file_name=f"当直一覧_{year}年{month}月.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+            )
+        except ImportError:
+            st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
+
+        st.divider()
         st.subheader("📅 作成した当直案")
         table_container = st.container()
 
@@ -2118,24 +2137,6 @@ if len(staff_df) > 0:
                 mime="text/csv",
             )
 
-        st.divider()
-        st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は★を付けて黒い太枠で囲みます。")
-        matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
-        missing_total = sum(len(info['shortage']) for info in matrix_days)
-        if missing_total:
-            st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
-        try:
-            st.download_button(
-                label="📥 この一覧をExcelでダウンロード（印刷用）",
-                data=duty_matrix_xlsx(matrix_days, matrix_rows, year, month),
-                file_name=f"当直一覧_{year}年{month}月.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-            )
-        except ImportError:
-            st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
-        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
 
 else:
     st.warning("☝️ 表に先生の名前を入力するか、CSVファイルをアップロードしてください。")
