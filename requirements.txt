@@ -3,3 +3,5 @@ pandas
 ortools
 jpholiday
 openpyxl
+gspread
+google-auth
