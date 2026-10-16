@@ -464,6 +464,7 @@ MATRIX_SHIFT_COLORS = {
 MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
 MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
 MATRIX_HOLIDAY_HEAD = '#c0392b'
+MATRIX_WISH_FRAME = '#ff8c00'   # 希望が通った当直の囲み線（オレンジ）
 # 右端の回数の列（宿直・日直・病棟・外来・平日・休日・合計）
 MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
 MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
@@ -503,6 +504,7 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
         name = str(staff['先生の名前'])
         ng = parse_ng_dict(staff.get(NG_COLUMN, ''), year, month)
         pm_days = pm_duty_weekdays(staff.get('翌日PM duty', ''))
+        wish_days, wish_specific = parse_requests(staff.get(REQUEST_COLUMN, ''), year, month)
         cells = []
         weekday_count = holiday_count = ward_count = outpatient_count = night_count = day_count = 0
         for info in days:
@@ -518,7 +520,9 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 day_count += sum(1 for s in assigned if s in DAY_SHIFTS)
                 ward_count += sum(1 for s in assigned if s in MATRIX_WARD_SHIFTS)
                 outpatient_count += sum(1 for s in assigned if s in MATRIX_OUTPATIENT_SHIFTS)
-                cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0]})
+                # 希望が通った日（日付だけの希望はどの枠でも、枠指定の希望はその枠に入ったとき）
+                wish = d in wish_days or any((d, s) in wish_specific for s in assigned)
+                cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0], 'wish': wish})
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
@@ -585,6 +589,7 @@ def duty_matrix_html(days, rows, year, month):
     legend = ['<div class="dm-legend">']
     for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
+    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;</i>希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
@@ -603,7 +608,8 @@ def duty_matrix_html(days, rows, year, month):
             td_class = ' class="hol"' if info['holiday'] else ''
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
-                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg}">{cell["text"].replace("/", "<br>")}</div></td>')
+                wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME};' if cell.get('wish') else ''
+                tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};{wish_css}">{cell["text"].replace("/", "<br>")}</div></td>')
             elif cell['type'] == 'ng':
                 pm_class = ' pm' if cell.get('pm') else ''
                 tr.append(f'<td{td_class}><div class="cell ng{pm_class}">{cell["text"]}</div></td>')
@@ -671,6 +677,8 @@ def duty_matrix_xlsx(days, rows, year, month):
         if c.font is None or not c.font.bold:
             c.font = Font(bold=True)
     group_side = Side(style='medium', color='7B8698')
+    wish_side = Side(style='thick', color=MATRIX_WISH_FRAME.lstrip('#').upper())
+    wish_border = Border(left=wish_side, right=wish_side, top=wish_side, bottom=wish_side)
 
     def style_count_cell(c, key, is_head):
         head_bg, body_bg = MATRIX_COUNT_GROUP_COLORS[key]
@@ -705,6 +713,10 @@ def duty_matrix_xlsx(days, rows, year, month):
             c = ws.cell(row=r_idx, column=col)
             c.border = border
             c.alignment = center if col > 1 else Alignment(vertical='center')
+        # 希望日が通った当直をオレンジの太線で囲む
+        for i, cell in enumerate(row['cells']):
+            if cell.get('wish'):
+                ws.cell(row=r_idx, column=first_day_col + i).border = wish_border
         for j, (key, _) in enumerate(MATRIX_COUNT_COLUMNS):
             style_count_cell(ws.cell(row=r_idx, column=sum_col + j), key, False)
         # 同じ日に2つ当直がある医師の行は、2段で表示できる高さにする
@@ -742,6 +754,8 @@ def duty_matrix_xlsx(days, rows, year, month):
         c = ws.cell(row=legend_row, column=2 + k * 2, value=label)
         c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
     ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
+    ws.cell(row=legend_row + 4, column=2).border = wish_border
+    ws.cell(row=legend_row + 4, column=3, value='希望日が通った当直')
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
     ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
     ws.cell(row=legend_row + 2, column=3, value='翌日PM duty（宿直を外す日）')
@@ -2078,81 +2092,8 @@ if len(staff_df) > 0:
             )
 
         st.divider()
-        st.subheader("📊 当直案の担当回数・希望日・勤務間隔")
-        st.caption("回数は作成した当直案の集計です。最小・平均間隔は読み込んだ月外の勤務も含む、勤務日と次の勤務日の間の日数です。同じ日の複数勤務は、間隔の集計では1日として扱います。")
-
-        requests_by_doc = {
-            str(row['先生の名前']): parse_requests(row.get(REQUEST_COLUMN, ''), year, month)
-            for _, row in staff_df.iterrows()
-        }
-        holiday_rows = df_result[df_result['平日/休日'] == '休日']
-
-        summary_list = []
-        for doc in doctors_list:
-            doc_data = {"先生の名前": doc}
-
-            doc_working_dates = set(past_worked_dates.get(doc, [])) | set(future_worked_dates.get(doc, []))
-            for d_idx in range(len(df_result)):
-                row = df_result.iloc[d_idx]
-                if any(doc in split_names(row[s]) for s in shift_columns):
-                    doc_working_dates.add(datetime.date(year, month, d_idx + 1))
-
-            total_count = 0
-            hol_count = 0
-            for s in shift_columns:
-                count = sum(1 for val in df_result[s] if doc in split_names(val))
-                doc_data[s] = count
-                total_count += count
-                hol_count += sum(1 for val in holiday_rows[s] if doc in split_names(val))
-
-            doc_data["宿直回数"] = sum(doc_data[s] for s in NIGHT_SHIFTS)
-            doc_data["日直回数"] = sum(doc_data[s] for s in DAY_SHIFTS)
-            doc_data["休日回数"] = hol_count
-            doc_data["総合計"] = total_count
-
-            sorted_dates = sorted(doc_working_dates)
-            if len(sorted_dates) >= 2:
-                intervals = [(sorted_dates[i] - sorted_dates[i - 1]).days - 1 for i in range(1, len(sorted_dates))]
-                doc_data["最小間隔"] = min(intervals)
-                doc_data["平均間隔"] = sum(intervals) / len(intervals)
-            else:
-                doc_data["最小間隔"] = None
-                doc_data["平均間隔"] = None
-
-            wish_days, wish_specific = requests_by_doc.get(doc, ([], []))
-            total_reqs = len(wish_days) + len(wish_specific)
-            if total_reqs > 0:
-                current_month_days = {d.day for d in sorted_dates if (d.year, d.month) == (year, month)}
-                granted = sum(1 for d in wish_days if d in current_month_days)
-                for req_d, req_s in wish_specific:
-                    if req_d - 1 < len(df_result):
-                        row_result = df_result.iloc[req_d - 1]
-                        if req_s in row_result and doc in split_names(row_result[req_s]):
-                            granted += 1
-                doc_data["希望日達成"] = f"{granted} / {total_reqs} 回"
-            else:
-                doc_data["希望日達成"] = "-"
-
-            summary_list.append(doc_data)
-
-        df_summary = pd.DataFrame(summary_list)
-        df_summary = df_summary[['先生の名前'] + ALL_SHIFT_TYPES + ['宿直回数', '日直回数', '休日回数', '総合計', '希望日達成', '最小間隔', '平均間隔']]
-        df_summary = df_summary.set_index('先生の名前')
-
-        styled_summary = df_summary.style.format(
-            {"最小間隔": "{:.0f}", "平均間隔": "{:.1f}"}, na_rep="-"
-        ).set_properties(
-            subset=['総合計', '宿直回数', '日直回数'], **{'font-weight': 'bold'}
-        ).set_properties(
-            subset=['希望日達成'], **{'text-align': 'center'}
-        )
-
-        summary_height = len(df_summary) * 35 + 40
-        st.dataframe(styled_summary, use_container_width=True, height=summary_height)
-
-        st.divider()
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。当直が決まった日は当直を優先して表示します。")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直はオレンジの枠で囲みます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
