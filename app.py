@@ -2063,9 +2063,6 @@ if len(staff_df) > 0:
         table_container = st.container()
 
         st.divider()
-        st.subheader("🔍 特定の医師の当直を色別でハイライト")
-        st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
-
         # (見出し, 選択欄のキー, メモ欄のキー, セルの色)
         highlight_colors = [
             ("🟨 **黄色**", "hl_yellow", "memo_y", 'background-color: #fff200; color: #000000; font-weight: bold; border: 2px solid #ffcc00;'),
@@ -2077,17 +2074,21 @@ if len(staff_df) > 0:
             ("🟪 **紫色**", "hl_purple", "memo_p", 'background-color: #e6ccff; color: #000000; font-weight: bold; border: 2px solid #b366ff;'),
             ("💗 **ピンク**", "hl_pink", "memo_pi", 'background-color: #ffccff; color: #000000; font-weight: bold; border: 2px solid #ff66ff;'),
         ]
-        selected_by_color = []
-        for pair_start in range(0, len(highlight_colors), 2):
-            columns = st.columns(2)
-            for column, (title, select_key, memo_key, style) in zip(columns, highlight_colors[pair_start:pair_start + 2]):
-                with column:
-                    st.markdown(title)
-                    label = title.replace("*", "").split(" ", 1)[-1]
-                    selected = st.multiselect(label, options=doctors_list, default=[], key=select_key, label_visibility="collapsed")
-                    st.text_input(label + "メモ", key=memo_key, placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
-                    selected_by_color.append((set(selected), style))
-            st.write("")
+        # 見出しの文字は固定にする（文字が変わると、選んでいる途中で欄が閉じてしまうため）
+        with st.expander("🔍 特定の医師の当直を色別でハイライト（任意・クリックで開く）", expanded=False):
+            st.write("※各色のすぐ下にあるメモ欄に「神経内科」「呼吸器内科」など自由に書き込めます。")
+
+            selected_by_color = []
+            for pair_start in range(0, len(highlight_colors), 2):
+                columns = st.columns(2)
+                for column, (title, select_key, memo_key, style) in zip(columns, highlight_colors[pair_start:pair_start + 2]):
+                    with column:
+                        st.markdown(title)
+                        label = title.replace("*", "").split(" ", 1)[-1]
+                        selected = st.multiselect(label, options=doctors_list, default=[], key=select_key, label_visibility="collapsed")
+                        st.text_input(label + "メモ", key=memo_key, placeholder="自由記入欄", label_visibility="collapsed", autocomplete="off")
+                        selected_by_color.append((set(selected), style))
+                st.write("")
 
         def color_highlighted_doctor(val):
             val_str = str(val)
