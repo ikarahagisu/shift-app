@@ -1356,9 +1356,479 @@ def show_schedule_notice(result, messages):
 
 
 # ==========================================
+# 先生ごとの専用URLからNG日を入力してもらう仕組み
+# 入力内容は管理者のGoogleスプレッドシートに保存する。
+#   ・tokens      … 先生ごとの固定キー（専用URLの「?key=」の部分）
+#   ・settings    … 受付中の年月・休日設定・締め切り状態
+#   ・submissions … 先生が保存するたびに1行ずつ追記（最新の行が有効。履歴として残る）
+# ==========================================
+DEFAULT_APP_URL = "https://shift-app-unwcytc7aqvml6k9djhfup.streamlit.app"
+REMOTE_SHEETS = {
+    "tokens": ["先生", "キー", "翌日PM duty", "作成日時"],
+    "settings": ["項目", "値"],
+    "submissions": ["年月", "先生", "NG日", "保存日時"],
+}
+
+
+def remote_now():
+    """日本時間の現在時刻（記録用の文字列）。"""
+    from zoneinfo import ZoneInfo
+    return datetime.datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y/%m/%d %H:%M:%S")
+
+
+def remote_secret(name, default=None):
+    try:
+        return st.secrets[name]
+    except Exception:
+        return default
+
+
+def remote_service_account_info():
+    """
+    Googleの鍵を読み込む。次のどちらの書き方でもよい。
+      ・gcp_service_account_json = ''' （ダウンロードしたJSONファイルの中身をそのまま） '''
+      ・[gcp_service_account] の表に1項目ずつ書く
+    """
+    raw = remote_secret("gcp_service_account_json")
+    if raw:
+        return json.loads(str(raw))
+    table = remote_secret("gcp_service_account")
+    return dict(table) if table is not None else None
+
+
+def remote_is_configured():
+    has_key = remote_secret("gcp_service_account_json") is not None or remote_secret("gcp_service_account") is not None
+    return has_key and remote_secret("ng_sheet_url") is not None
+
+
+@st.cache_resource
+def remote_spreadsheet():
+    """保存用スプレッドシートに接続する（接続は使い回す）。"""
+    import gspread
+    client = gspread.service_account_from_dict(remote_service_account_info())
+    return client.open_by_url(st.secrets["ng_sheet_url"])
+
+
+def remote_worksheet(name):
+    """シートがなければ見出し付きで作る。"""
+    import gspread
+    sh = remote_spreadsheet()
+    try:
+        return sh.worksheet(name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=name, rows=200, cols=len(REMOTE_SHEETS[name]))
+        ws.update(values=[REMOTE_SHEETS[name]], range_name="A1", value_input_option="RAW")
+        return ws
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def remote_read(name):
+    """シートの中身を辞書のリストで返す。数字に変換されないよう、すべて文字列のまま読む。"""
+    values = remote_worksheet(name).get_all_values()
+    if not values:
+        return []
+    header = values[0]
+    return [dict(zip(header, row + [""] * (len(header) - len(row)))) for row in values[1:] if any(c.strip() for c in row)]
+
+
+def remote_clear_cache():
+    remote_read.clear()
+
+
+def remote_append(name, row):
+    remote_worksheet(name).append_row([str(v) for v in row], value_input_option="RAW")
+    remote_clear_cache()
+
+
+def remote_rewrite(name, rows):
+    """シートを丸ごと書き直す（tokens・settings用。行数が少ないもの）。"""
+    ws = remote_worksheet(name)
+    ws.clear()
+    ws.update(values=[REMOTE_SHEETS[name]] + [[str(v) for v in r] for r in rows], range_name="A1", value_input_option="RAW")
+    remote_clear_cache()
+
+
+def remote_settings():
+    return {r.get("項目", ""): r.get("値", "") for r in remote_read("settings")}
+
+
+def remote_save_settings(**changes):
+    current = remote_settings()
+    current.update({k: str(v) for k, v in changes.items()})
+    remote_rewrite("settings", [[k, v] for k, v in current.items()])
+
+
+def remote_tokens():
+    """{先生: {"キー":…, "翌日PM duty":…}}"""
+    return {r["先生"]: r for r in remote_read("tokens") if r.get("先生")}
+
+
+def remote_new_key():
+    import secrets
+    return secrets.token_urlsafe(9)
+
+
+def remote_sync_doctors(doctor_rows):
+    """
+    名簿の先生全員に固定キーを用意する。すでにある先生のキーは変えない（URLは固定）。
+    doctor_rows: [(先生, 翌日PM duty)]
+    """
+    existing = remote_tokens()
+    rows = []
+    for name, pm in doctor_rows:
+        old = existing.get(name)
+        rows.append([name, old["キー"] if old and old.get("キー") else remote_new_key(), pm, old.get("作成日時", remote_now()) if old else remote_now()])
+    # 名簿から外れた先生の行も残す（キーを再利用されないよう、記録として保持）
+    listed = {name for name, _ in doctor_rows}
+    for name, r in existing.items():
+        if name not in listed:
+            rows.append([name, r.get("キー", ""), r.get("翌日PM duty", ""), r.get("作成日時", "")])
+    remote_rewrite("tokens", rows)
+
+
+def remote_regenerate_key(name):
+    rows = []
+    for doc, r in remote_tokens().items():
+        key = remote_new_key() if doc == name else r.get("キー", "")
+        rows.append([doc, key, r.get("翌日PM duty", ""), remote_now() if doc == name else r.get("作成日時", "")])
+    remote_rewrite("tokens", rows)
+
+
+def remote_latest_submissions(month_key):
+    """その年月の、先生ごとの最新の提出 {先生: {"NG日":…, "保存日時":…}}"""
+    latest = {}
+    for r in remote_read("submissions"):
+        if r.get("年月") == month_key and r.get("先生"):
+            latest[r["先生"]] = r   # 後ろの行ほど新しい
+    return latest
+
+
+def remote_doctor_url(key):
+    base = str(remote_secret("app_url", DEFAULT_APP_URL)).rstrip("/")
+    return f"{base}/?key={key}"
+
+
+def ng_dict_to_text(values_by_day):
+    """{日: NG種類} をアプリのNG日の書き方（例：3,10:宿NG）にする。"""
+    items = []
+    for d in sorted(values_by_day):
+        v = values_by_day[d]
+        if v == "全NG":
+            items.append(str(d))
+        elif v in ("日NG", "宿NG"):
+            items.append(f"{d}:{v}")
+    return ",".join(items)
+
+
+def ng_text_summary(text, year, month, holidays):
+    """NG日の文字列を「3日、10日(宿直NG)」のような読みやすい形にする。"""
+    parts = []
+    for d, v in sorted(parse_ng_dict(text, year, month).items()):
+        shown = effective_ng(v, is_holiday_date(datetime.date(year, month, d), year, month, holidays))
+        if shown == "全NG":
+            parts.append(f"{d}日")
+        elif shown == "日NG":
+            parts.append(f"{d}日(日直NG)")
+        elif shown == "宿NG":
+            parts.append(f"{d}日(宿直NG)")
+    return "、".join(parts)
+
+
+def ng_calendar_days(year, month, holidays, next_month_special_holiday, pm_weekdays, values_by_day):
+    """NGカレンダー部品に渡す日ごとのデータを作る。"""
+    days = []
+    for d in range(1, calendar.monthrange(year, month)[1] + 1):
+        dt = datetime.date(year, month, d)
+        hol = is_holiday_date(dt, year, month, holidays)
+        days.append({
+            "day": d, "weekday": WEEKDAYS_JA[dt.weekday()],
+            "options": ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"],
+            "value": effective_ng(values_by_day.get(d, "OK"), hol),
+            "warning": pm_duty_restricted(dt, pm_weekdays, year, month, holidays, next_month_special_holiday),
+            "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in holidays else ("holiday" if hol else "weekday"),
+        })
+    return days
+
+
+def parse_month_key(month_key):
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})", str(month_key).strip())
+    if not m:
+        return None
+    y, mo = int(m.group(1)), int(m.group(2))
+    return (y, mo) if 1 <= mo <= 12 else None
+
+
+def parse_holiday_list(text):
+    return sorted({int(x) for x in re.findall(r"\d+", str(text))})
+
+
+def doctor_entry_page(key):
+    """専用URLで開いた先生用の画面。その先生のNG日だけを入力・保存できる。"""
+    st.markdown("<style>[data-testid='stSidebar']{display:none}</style>", unsafe_allow_html=True)
+    if not remote_is_configured():
+        st.error("現在、NG日の入力を受け付けていません（準備中です）。担当者にお問い合わせください。")
+        return
+    try:
+        tokens = remote_tokens()
+        settings = remote_settings()
+    except Exception:
+        st.error("データを読み込めませんでした。しばらくしてから、もう一度開いてください。")
+        return
+    doctor = next((name for name, r in tokens.items() if r.get("キー") and r.get("キー") == key), None)
+    if doctor is None:
+        st.error("このURLは無効です。担当者から届いた最新のURLを開いてください。")
+        return
+
+    ym = parse_month_key(settings.get("受付中の年月", ""))
+    if ym is None:
+        st.info(f"{doctor} 先生、現在受け付けているNG日の入力はありません。")
+        return
+    year, month = ym
+    holidays = parse_holiday_list(settings.get("特別休日", ""))
+    next_special = settings.get("翌月1日特別休日", "") == "True"
+    closed = settings.get("締め切り", "") == "True"
+    deadline = settings.get("締め切り日", "").strip()
+
+    st.title(f"{year}年{month}月　当直NG日の入力")
+    st.subheader(f"🩺 {doctor} 先生")
+    latest = remote_latest_submissions(f"{year}-{month}").get(doctor)
+    saved_text = latest.get("NG日", "") if latest else ""
+
+    if closed:
+        st.warning("受付は締め切りました。変更がある場合は、担当者に直接ご連絡ください。")
+        if latest:
+            summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし"
+            st.write(f"提出内容（{latest.get('保存日時', '')} 保存）：{summary}")
+        else:
+            st.write("この月のNG日は提出されていません。")
+        return
+
+    if deadline:
+        st.info(f"締め切り：{deadline}　締め切りまでは、このページから何度でも修正できます。")
+    flash = st.session_state.pop("remote_saved_message", None)
+    if flash:
+        st.success(flash)
+    elif latest:
+        summary = ng_text_summary(saved_text, year, month, holidays) or "NG日なし"
+        st.success(f"✅ 提出済み（{latest.get('保存日時', '')}）：{summary}")
+    else:
+        st.info("まだ提出されていません。当直に入れない日を選び、下の保存ボタンを押してください。NG日がない場合も、そのまま保存ボタンを押してください。")
+
+    with st.expander("NGの種類について", expanded=False):
+        st.markdown("""
+- **宿NG**：宿直（夜）に入れない日。平日はこれを選びます。
+- **日NG**：日直（日中）に入れない日。土日祝だけ選べます。
+- **全NG**：日直・宿直とも入れない日。土日祝だけ選べます。
+- ⚠ の日は、翌日PMにdutyがあるため、原則として宿直を外します。
+        """)
+
+    layout = st.radio("表示", ["月間カレンダー", "1日〜月末を横一列"], horizontal=True, key="remote_layout")
+    pm_weekdays = pm_duty_weekdays(tokens[doctor].get("翌日PM duty", ""))
+    values = parse_ng_dict(saved_text, year, month)
+    days = ng_calendar_days(year, month, holidays, next_special, pm_weekdays, values)
+    revision = hashlib.sha256(json.dumps([year, month, doctor, layout, days], ensure_ascii=False).encode()).hexdigest()
+    component_key = f"remote_ng_{'row' if layout != '月間カレンダー' else 'month'}_{year}_{month}"
+    response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
+        days=days, mode="row" if layout != "月間カレンダー" else "month",
+        offset=datetime.date(year, month, 1).weekday(), doctor=doctor,
+        version=revision, key=component_key, default=None,
+    )
+    seen_key = component_key + "_last_token"
+    if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
+        st.session_state[seen_key] = response.get("token")
+        new_values = response.get("values")
+        if response.get("version") == revision and isinstance(new_values, list) and len(new_values) == len(days) \
+                and all(v in item["options"] for v, item in zip(new_values, days)):
+            # 締め切り直前に保存された場合に備えて、保存の直前にもう一度確認する
+            remote_clear_cache()
+            if remote_settings().get("締め切り", "") == "True":
+                st.error("受付が締め切られたため、保存できませんでした。担当者に直接ご連絡ください。")
+                return
+            # 画面で選べない日（平日の日NGなど）の過去の値は、そのまま残す
+            merged = dict(values)
+            for d, (v, item) in enumerate(zip(new_values, days), 1):
+                if v != item["value"]:
+                    if v == "OK":
+                        merged.pop(d, None)
+                    else:
+                        merged[d] = v
+            try:
+                now = remote_now()
+                remote_append("submissions", [f"{year}-{month}", doctor, ng_dict_to_text(merged), now])
+            except Exception:
+                st.error("保存できませんでした。通信状態を確認して、もう一度保存ボタンを押してください。")
+                return
+            summary = ng_text_summary(ng_dict_to_text(merged), year, month, holidays) or "NG日なし"
+            st.session_state["remote_saved_message"] = f"✅ 保存しました（{now}）：{summary}"
+            st.rerun()
+    st.caption("このページのURLは、先生専用です。ほかの方には共有しないでください。")
+
+
+def import_remote_ng(year, month, submissions):
+    """先生方の提出内容を、アプリのNGカレンダー（画面の保存値）に取り込む。"""
+    num_days = calendar.monthrange(year, month)[1]
+    for doctor, r in submissions.items():
+        values = parse_ng_dict(r.get("NG日", ""), year, month)
+        for d in range(1, num_days + 1):
+            st.session_state[f"ng_{doctor}_{year}_{month}_{d}"] = values.get(d, "OK")
+    st.session_state["remote_import_message"] = f"{len(submissions)}名分のNG日を取り込みました。"
+
+
+def remote_admin_panel(year, month, doctor_rows, custom_holidays, next_month_special_holiday, day_is_holiday):
+    """管理者用：受付の開始・締め切り、専用URL、提出状況、取り込み。"""
+    with st.expander("📨 先生方からのNG日入力（専用URL）", expanded=False):
+        if not remote_is_configured():
+            st.info("この機能を使うには、最初に保存用のGoogleスプレッドシートとの接続設定が必要です。設定方法は担当者向けの手順書を参照してください。")
+            return
+        admin_password = remote_secret("admin_password")
+        if not admin_password:
+            st.error("管理用パスワード（admin_password）が設定されていません。Secretsに追加してください。")
+            return
+        if not st.session_state.get("remote_admin_ok"):
+            pw = st.text_input("管理用パスワード", type="password", key="remote_admin_pw")
+            if pw:
+                if pw == str(admin_password):
+                    st.session_state["remote_admin_ok"] = True
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います。")
+            return
+
+        try:
+            settings = remote_settings()
+            tokens = remote_tokens()
+        except Exception as e:
+            st.error(f"スプレッドシートを読み込めませんでした。接続設定を確認してください。詳細：{e}")
+            return
+
+        month_key = f"{year}-{month}"
+        active = settings.get("受付中の年月", "")
+        closed = settings.get("締め切り", "") == "True"
+        if active == month_key:
+            status = "🔒 締め切り済み" if closed else "🟢 受付中"
+            st.markdown(f"**{year}年{month}月：{status}**（締め切り日の表示：{settings.get('締め切り日', '') or '未設定'}）")
+        elif active:
+            st.warning(f"現在の受付は「{active.replace('-', '年')}月」です。上で選んでいる{year}年{month}月とは異なります。")
+        else:
+            st.markdown("**現在、受付していません。**")
+
+        # --- 受付の開始・締め切り ---
+        deadline = st.text_input("先生方に表示する締め切り日（例：10月25日）", value=settings.get("締め切り日", "") if active == month_key else "", key="remote_deadline")
+        c1, c2, c3 = st.columns(3)
+        if c1.button(f"{year}年{month}月の受付を開始する", key="remote_open", use_container_width=True,
+                     help="上で設定した年月・特別休日で受付を始めます。先生の名簿と専用URLも更新します。"):
+            remote_sync_doctors(doctor_rows)
+            remote_save_settings(**{"受付中の年月": month_key, "特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                    "翌月1日特別休日": bool(next_month_special_holiday), "締め切り": False, "締め切り日": deadline})
+            st.rerun()
+        if active == month_key:
+            if not closed and c2.button("🔒 締め切る（先生側の編集を止める）", key="remote_close", use_container_width=True):
+                remote_save_settings(**{"締め切り": True})
+                st.rerun()
+            if closed and c2.button("受付を再開する", key="remote_reopen", use_container_width=True):
+                remote_save_settings(**{"締め切り": False})
+                st.rerun()
+            if c3.button("締め切り日・休日設定を更新", key="remote_update", use_container_width=True,
+                         help="受付中に「休日にする」や締め切り日を変えた場合に押します。"):
+                remote_save_settings(**{"特別休日": ",".join(map(str, sorted(custom_holidays))),
+                                        "翌月1日特別休日": bool(next_month_special_holiday), "締め切り日": deadline})
+                st.rerun()
+            saved_holidays = parse_holiday_list(settings.get("特別休日", ""))
+            if saved_holidays != sorted(custom_holidays):
+                st.warning("上のカレンダーの「休日にする」が、受付開始時の設定と違います。先生側の画面に反映するには「締め切り日・休日設定を更新」を押してください。")
+
+        # --- 専用URL ---
+        st.markdown("##### 🔗 先生ごとの専用URL（固定）")
+        missing = [name for name, _ in doctor_rows if name not in tokens]
+        if missing:
+            st.caption(f"まだURLがない先生：{'、'.join(missing)}")
+            if st.button("名簿の先生全員のURLを用意する", key="remote_sync"):
+                remote_sync_doctors(doctor_rows)
+                st.rerun()
+        url_rows = [{"先生": name, "専用URL": remote_doctor_url(tokens[name]["キー"])} for name, _ in doctor_rows if name in tokens]
+        if url_rows:
+            st.dataframe(pd.DataFrame(url_rows), hide_index=True, use_container_width=True,
+                         column_config={"専用URL": st.column_config.LinkColumn("専用URL（右上のアイコンでコピーできます）")})
+            st.download_button("📥 URL一覧をCSVでダウンロード", pd.DataFrame(url_rows).to_csv(index=False).encode("utf-8-sig"),
+                               file_name="NG日入力_専用URL一覧.csv", mime="text/csv", key="remote_url_csv")
+            if st.checkbox("URLを作り直す（URLが漏れてしまった場合）", key="remote_regen_open"):
+                target = st.selectbox("作り直す先生", [r["先生"] for r in url_rows], key="remote_regen_target")
+                st.caption("作り直すと、古いURLは使えなくなります。新しいURLをその先生に送り直してください。")
+                if st.button("この先生のURLを作り直す", key="remote_regen"):
+                    remote_regenerate_key(target)
+                    st.rerun()
+
+        # --- 提出状況と取り込み ---
+        st.markdown(f"##### 📋 {year}年{month}月の提出状況")
+        if st.button("🔄 最新の状態に更新", key="remote_refresh"):
+            remote_clear_cache()
+            st.rerun()
+        submissions = remote_latest_submissions(month_key)
+        status_rows = []
+        for name, _ in doctor_rows:
+            r = submissions.get(name)
+            text = r.get("NG日", "") if r else ""
+            status_rows.append({
+                "先生": name,
+                "状況": "✅ 提出済み" if r else "⏳ 未提出",
+                "最終保存": r.get("保存日時", "") if r else "",
+                "NG日": (ng_text_summary(text, year, month, custom_holidays) or "NG日なし") if r else "",
+            })
+        done = sum(1 for r in status_rows if r["状況"].startswith("✅"))
+        st.caption(f"提出済み {done} / {len(status_rows)} 名")
+        st.dataframe(pd.DataFrame(status_rows), hide_index=True, use_container_width=True)
+
+        flash = st.session_state.pop("remote_import_message", None)
+        if flash:
+            st.success(flash)
+        importable = {name: r for name, r in submissions.items() if name in {n for n, _ in doctor_rows}}
+        if importable:
+            changes = []
+            for name, r in importable.items():
+                new = parse_ng_dict(r.get("NG日", ""), year, month)
+                old = {d: st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK") for d in day_is_holiday}
+                old = {d: v for d, v in old.items() if v != "OK"}
+                if new != old:
+                    changes.append({"先生": name,
+                                    "今のNG日（アプリ）": ng_text_summary(ng_dict_to_text(old), year, month, custom_holidays) or "なし",
+                                    "取り込むNG日（提出）": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "なし"})
+            if changes:
+                st.markdown("**取り込むと変わる先生**")
+                st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
+                st.button(f"⬇️ 提出されたNG日を取り込む（{len(changes)}名分）", key="remote_import", type="primary",
+                          on_click=import_remote_ng, args=(year, month, {n: importable[n] for n in [c["先生"] for c in changes]}))
+                st.caption("提出していない先生のNG日は変わりません。取り込んだあとも、下のカレンダーで個別に直せます。")
+            else:
+                st.caption("提出内容は、すべてアプリに取り込み済みです。")
+        unknown = [name for name in submissions if name not in {n for n, _ in doctor_rows}]
+        if unknown:
+            st.caption(f"名簿にない先生の提出（取り込み対象外）：{'、'.join(unknown)}")
+
+        # （この欄自体が折りたたみの中にあるため、履歴はチェックボックスで開く）
+        if st.checkbox("変更の履歴を表示（だれが・いつ・どう変えたか）", key="remote_history_open"):
+            history = [r for r in remote_read("submissions") if r.get("年月") == month_key]
+            if history:
+                st.dataframe(pd.DataFrame([{"保存日時": r.get("保存日時", ""), "先生": r.get("先生", ""),
+                                            "NG日": ng_text_summary(r.get("NG日", ""), year, month, custom_holidays) or "NG日なし"}
+                                           for r in reversed(history)]), hide_index=True, use_container_width=True)
+            else:
+                st.caption("まだ履歴はありません。")
+
+
+# ==========================================
 # ページ設定
 # ==========================================
 st.set_page_config(page_title="当直作成アプリ", layout="wide")
+
+# 先生用の専用URL（…/?key=XXXX）で開かれたときは、その先生のNG日入力画面だけを表示する
+try:
+    _remote_key = st.query_params.get("key")
+except AttributeError:   # 古いStreamlit
+    _remote_key = (st.experimental_get_query_params().get("key") or [None])[0]
+if _remote_key:
+    doctor_entry_page(str(_remote_key))
+    st.stop()
+
 st.title("当直作成アプリ")
 st.caption("年月・勤務条件・NG日を入力して、当直表の案を作成します。")
 with st.expander("初めて使う方へ：入力からダウンロードまで", expanded=False):
@@ -1841,6 +2311,11 @@ day_is_holiday = {d: is_holiday_date(datetime.date(year, month, d), year, month,
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
+    remote_admin_panel(
+        year, month,
+        [(str(r["先生の名前"]), clean_text(r.get("翌日PM duty", ""))) for _, r in valid_staff.iterrows()],
+        custom_holidays, next_month_special_holiday, day_is_holiday,
+    )
     # 医師の選択はタブではなく選択欄にする。
     # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
     if st.session_state.get("ng_selected_doctor") not in doctor_names:
