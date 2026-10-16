@@ -2020,6 +2020,7 @@ if st.session_state.get('result_needs_refresh'):
 if len(staff_df) > 0:
     with create_button_container:
         create_clicked = st.button("🚀 この条件で当直案を作成する", type="primary", use_container_width=True)
+        st.caption("※ 押すたびに、同じ条件でも違うパターンの当直表を作ります。気に入った案はダウンロードして保存してください。")
     if create_clicked:
         with st.spinner("当直案を計算中…（通常は最大60秒、不足枠の確認を含む場合は計算時間が最大75秒です）"):
             try:
@@ -2065,6 +2066,7 @@ if len(staff_df) > 0:
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
             st.warning(f"当直が決まっていない枠が{missing_total}枠あります。表の一番下（赤線の下）で確認できます。")
+        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
         try:
             st.download_button(
                 label="📥 この一覧をExcelでダウンロード（印刷用）",
@@ -2075,7 +2077,6 @@ if len(staff_df) > 0:
             )
         except ImportError:
             st.error("Excelでダウンロードするには、Excelを扱う部品（openpyxl）が必要です。requirements.txt に「openpyxl」の1行を追加してください。")
-        st.markdown(duty_matrix_html(matrix_days, matrix_rows, year, month), unsafe_allow_html=True)
 
         st.divider()
         st.subheader("📅 作成した当直案")
