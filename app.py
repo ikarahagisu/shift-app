@@ -464,7 +464,7 @@ MATRIX_SHIFT_COLORS = {
 MATRIX_NG_COLOR = ('#ffffff', '#c0392b')          # ×（当直NG）
 MATRIX_PM_COLOR = ('#ffe9b3', '#7a4b00')          # PM（翌日PM dutyで宿直を外す日）
 MATRIX_HOLIDAY_HEAD = '#c0392b'
-MATRIX_WISH_FRAME = '#ff8c00'   # 希望が通った当直の囲み線（オレンジ）
+MATRIX_WISH_FRAME = '#111111'   # 希望が通った当直の囲み線（黒の太線）。枠名の前に★も付ける
 # 右端の回数の列（宿直・日直・病棟・外来・平日・休日・合計）
 MATRIX_WARD_SHIFTS = ('A日直', 'B日直', 'A宿直', 'B宿直')
 MATRIX_OUTPATIENT_SHIFTS = ('外来宿直', '外来日直')
@@ -522,7 +522,8 @@ def build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_mo
                 outpatient_count += sum(1 for s in assigned if s in MATRIX_OUTPATIENT_SHIFTS)
                 # 希望が通った日（日付だけの希望はどの枠でも、枠指定の希望はその枠に入ったとき）
                 wish = d in wish_days or any((d, s) in wish_specific for s in assigned)
-                cells.append({'type': 'shift', 'text': '/'.join(assigned), 'shift': assigned[0], 'wish': wish})
+                text = '/'.join(assigned)
+                cells.append({'type': 'shift', 'text': ('★' + text) if wish else text, 'shift': assigned[0], 'wish': wish})
                 continue
             kind = ng.get(d)
             pm = pm_duty_restricted(datetime.date(year, month, d), pm_days, year, month, custom_holidays, next_month_special_holiday)
@@ -589,7 +590,7 @@ def duty_matrix_html(days, rows, year, month):
     legend = ['<div class="dm-legend">']
     for s, (bg, fg) in MATRIX_SHIFT_COLORS.items():
         legend.append(f'<span><i style="background:{bg};color:{fg}">{s}</i></span>')
-    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">&nbsp;</i>希望日が通った当直</span>')
+    legend.append(f'<span><i style="box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME}">★</i>希望日が通った当直</span>')
     legend.append('<span><i style="color:#c0392b">×</i>当直NG（宿×＝宿直NG、日×＝日直NG）</span>')
     legend.append('<span><i style="background:repeating-linear-gradient(45deg,#f2c75c 0 2px,#fff5d9 2px 7px)">&nbsp;</i>翌日PM duty（宿直を外す日）</span>')
     legend.append('<span><i style="color:#c0392b;border-color:#c0392b">⚠️ 未決定</i>赤線の下：当直が決まっていない枠</span>')
@@ -608,7 +609,7 @@ def duty_matrix_html(days, rows, year, month):
             td_class = ' class="hol"' if info['holiday'] else ''
             if cell['type'] == 'shift':
                 bg, fg = MATRIX_SHIFT_COLORS.get(cell['shift'], ('#eee', '#000'))
-                wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME};' if cell.get('wish') else ''
+                wish_css = f'box-shadow:inset 0 0 0 3px {MATRIX_WISH_FRAME},inset 0 0 0 4px #ffffff;' if cell.get('wish') else ''
                 tr.append(f'<td><div class="cell" style="background:{bg};color:{fg};{wish_css}">{cell["text"].replace("/", "<br>")}</div></td>')
             elif cell['type'] == 'ng':
                 pm_class = ' pm' if cell.get('pm') else ''
@@ -754,7 +755,8 @@ def duty_matrix_xlsx(days, rows, year, month):
         c = ws.cell(row=legend_row, column=2 + k * 2, value=label)
         c.fill = fill(bg); c.font = Font(bold=True, size=8, color=fg.lstrip('#')); c.alignment = center; c.border = border
     ws.cell(row=legend_row + 1, column=2, value='×').font = Font(bold=True, color='C0392B')
-    ws.cell(row=legend_row + 4, column=2).border = wish_border
+    wish_legend = ws.cell(row=legend_row + 4, column=2, value='★')
+    wish_legend.border = wish_border; wish_legend.alignment = center; wish_legend.font = Font(bold=True)
     ws.cell(row=legend_row + 4, column=3, value='希望日が通った当直')
     ws.cell(row=legend_row + 1, column=3, value='当直NG（宿×＝宿直NG、日×＝日直NG）')
     ws.cell(row=legend_row + 2, column=2).fill = PM_FILL
@@ -1807,7 +1809,7 @@ if "月間最大回数" in staff_df.columns:
 st.divider()
 
 st.markdown("### 🚫 先生ごとのNG日設定（カレンダーで詳細選択）")
-st.info("医師名のタブを選び、当直NGを選択してください。最後に「NG日を保存する」を押してください。")
+st.info("医師を選び、当直NGを選択してください。最後に「NG日を保存する」を押してください。表示を切り替えても、選んでいる医師はそのままです。")
 with st.expander("NGの種類・一括操作について", expanded=False):
     st.markdown("""
 | 選択肢 | 意味 |
@@ -1839,85 +1841,109 @@ day_is_holiday = {d: is_holiday_date(datetime.date(year, month, d), year, month,
 valid_staff = staff_df[staff_df["先生の名前"].astype(str).str.strip() != ""]
 if not valid_staff.empty:
     doctor_names = valid_staff["先生の名前"].astype(str).tolist()
-    tabs = st.tabs(doctor_names)
+    # 医師の選択はタブではなく選択欄にする。
+    # （タブは表示の切り替えなどで画面が作り直されると先頭の医師に戻ってしまい、入力ミスの原因になるため）
+    if st.session_state.get("ng_selected_doctor") not in doctor_names:
+        st.session_state["ng_selected_doctor"] = doctor_names[0]
+
+    def ng_doctor_label(name):
+        count = sum(
+            1 for d in range(1, num_days + 1)
+            if effective_ng(st.session_state.get(f"ng_{name}_{year}_{month}_{d}", "OK"), day_is_holiday[d]) != "OK"
+        )
+        return f"{name}（NG {count}日）" if count else f"{name}（NGなし）"
+
+    def move_ng_doctor(step):
+        i = doctor_names.index(st.session_state["ng_selected_doctor"])
+        st.session_state["ng_selected_doctor"] = doctor_names[(i + step) % len(doctor_names)]
+
+    sel_col, prev_col, next_col = st.columns([6, 1.2, 1.2])
+    selected_doc = sel_col.selectbox("NG日を入力する医師", doctor_names, key="ng_selected_doctor", format_func=ng_doctor_label)
+    # ボタンの高さを選択欄にそろえるための余白
+    prev_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+    next_col.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+    prev_col.button("◀ 前の医師", key="ng_prev_doctor", on_click=move_ng_doctor, args=(-1,), use_container_width=True)
+    next_col.button("次の医師 ▶", key="ng_next_doctor", on_click=move_ng_doctor, args=(1,), use_container_width=True)
 
     for t_idx, doc_name in enumerate(doctor_names):
         original_idx = valid_staff.index[t_idx]
-        with tabs[t_idx]:
-            doc_row = valid_staff.loc[original_idx]
-            hard_days = pm_duty_weekdays(doc_row.get("翌日PM duty", ""))
-            current_ng_dict = parse_ng_dict(doc_row.get(NG_COLUMN, ""), year, month)
+        doc_row = valid_staff.loc[original_idx]
+        hard_days = pm_duty_weekdays(doc_row.get("翌日PM duty", ""))
+        current_ng_dict = parse_ng_dict(doc_row.get(NG_COLUMN, ""), year, month)
 
-            # 初回だけ、表（CSV）のNG指定を読み込む。以後は画面で保存した内容を使う。
-            for d in range(1, num_days + 1):
-                chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
-                if chk_key not in st.session_state:
-                    st.session_state[chk_key] = current_ng_dict.get(d, "OK")
+        # 初回だけ、表（CSV）のNG指定を読み込む。以後は画面で保存した内容を使う。
+        for d in range(1, num_days + 1):
+            chk_key = f"ng_{doc_name}_{year}_{month}_{d}"
+            if chk_key not in st.session_state:
+                st.session_state[chk_key] = current_ng_dict.get(d, "OK")
 
-            # 保存値は書き換えず、その日に実際に効く内容だけを表示する
-            shown = {d: effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
+        if doc_name == selected_doc:
+            with st.container(border=True):
+                st.markdown(f"#### 🩺 {doc_name} 先生のNG日")
+                # 保存値は書き換えず、その日に実際に効く内容だけを表示する
+                shown = {d: effective_ng(st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"], day_is_holiday[d]) for d in range(1, num_days + 1)}
 
-            saved_strs = []
-            for d, val in shown.items():
-                if val == "全NG": saved_strs.append(f"{d}日")
-                elif val == "日NG": saved_strs.append(f"{d}日(日直NG)")
-                elif val == "宿NG": saved_strs.append(f"{d}日(宿直NG)")
-            if saved_strs:
-                st.success(f"✅ **保存済みのNG日:** {', '.join(saved_strs)}")
-            else:
-                st.info("💡 **現在、保存されているNG日はありません**")
+                saved_strs = []
+                for d, val in shown.items():
+                    if val == "全NG": saved_strs.append(f"{d}日")
+                    elif val == "日NG": saved_strs.append(f"{d}日(日直NG)")
+                    elif val == "宿NG": saved_strs.append(f"{d}日(宿直NG)")
+                if saved_strs:
+                    st.success(f"✅ **保存済みのNG日:** {', '.join(saved_strs)}")
+                else:
+                    st.info("💡 **現在、保存されているNG日はありません**")
 
-            component_days = []
-            for d in range(1, num_days + 1):
-                dt = datetime.date(year, month, d)
-                hol = day_is_holiday[d]
-                options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
-                component_days.append({
-                    "day": d, "weekday": WEEKDAYS_JA[dt.weekday()],
-                    "options": options, "value": shown[d],
-                    "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
-                    "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
-                })
-            revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
-            component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
-            st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
-            response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
-                days=component_days, mode="row" if ng_horizontal else "month",
-                offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
-                version=revision, key=component_key, default=None,
-            )
-            seen_key = component_key + "_last_token"
-            if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
-                st.session_state[seen_key] = response.get("token")
-                values = response.get("values")
-                if response.get("version") == revision and isinstance(values, list) and len(values) == num_days:
-                    if all(v in item["options"] for v, item in zip(values, component_days)):
-                        changed = False
-                        for d, (value, item) in enumerate(zip(values, component_days), 1):
-                            # 画面で実際に変更した日だけ保存値を更新する
-                            # （休日設定の切り替えで隠れているNG指定を消さないため）
-                            if value != item["value"]:
-                                st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = value
-                                changed = True
-                        if changed:
-                            st.rerun()
+                component_days = []
+                for d in range(1, num_days + 1):
+                    dt = datetime.date(year, month, d)
+                    hol = day_is_holiday[d]
+                    options = ["OK", "全NG", "日NG", "宿NG"] if hol else ["OK", "宿NG"]
+                    component_days.append({
+                        "day": d, "weekday": WEEKDAYS_JA[dt.weekday()],
+                        "options": options, "value": shown[d],
+                        "warning": pm_duty_restricted(dt, hard_days, year, month, custom_holidays, next_month_special_holiday),
+                        "kind": "saturday" if dt.weekday() == 5 and not jpholiday.is_holiday(dt) and d not in custom_holidays else ("holiday" if hol else "weekday"),
+                    })
+                revision = hashlib.sha256(json.dumps([year, month, doc_name, ng_layout, component_days], ensure_ascii=False).encode()).hexdigest()
+                component_key = f"ng_editor_{'row' if ng_horizontal else 'month'}_{doc_name}_{year}_{month}"
+                st.markdown("<div style='color:#bf5700;background:#fff0c2;border:1px solid #ef9b20;border-radius:6px;padding:8px 10px;font-size:0.9rem;font-weight:600;'>⚠は、翌日PMにdutyがあるため、原則としてその日の宿直を外すことを示します。翌日が休日の場合は⚠を表示せず、この制限の対象外になります。</div>", unsafe_allow_html=True)
+                response = horizontal_ng_component(HORIZONTAL_NG_HTML)(
+                    days=component_days, mode="row" if ng_horizontal else "month",
+                    offset=datetime.date(year, month, 1).weekday(), doctor=doc_name,
+                    version=revision, key=component_key, default=None,
+                )
+                seen_key = component_key + "_last_token"
+                if isinstance(response, dict) and response.get("token") != st.session_state.get(seen_key):
+                    st.session_state[seen_key] = response.get("token")
+                    values = response.get("values")
+                    if response.get("version") == revision and isinstance(values, list) and len(values) == num_days:
+                        if all(v in item["options"] for v, item in zip(values, component_days)):
+                            changed = False
+                            for d, (value, item) in enumerate(zip(values, component_days), 1):
+                                # 画面で実際に変更した日だけ保存値を更新する
+                                # （休日設定の切り替えで隠れているNG指定を消さないため）
+                                if value != item["value"]:
+                                    st.session_state[f"ng_{doc_name}_{year}_{month}_{d}"] = value
+                                    changed = True
+                            if changed:
+                                st.rerun()
 
-            _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
-            with col_btn1:
-                st.button("全日NGにする", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
-            with col_btn2:
-                st.button("すべてOKに戻す", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
+                _, col_btn1, col_btn2 = st.columns([6, 1.5, 1.5])
+                with col_btn1:
+                    st.button("全日NGにする", key=f"btn_all_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "全NG", custom_holidays), use_container_width=True)
+                with col_btn2:
+                    st.button("すべてOKに戻す", key=f"btn_clear_{doc_name}_{year}_{month}", on_click=set_all_ng, args=(doc_name, year, month, num_days, "OK", custom_holidays), use_container_width=True)
 
-            # 保存値（指定したとおりの内容）を医師条件へ書き込む。
-            # 平日の全NGは計算上は宿NGと同じ、平日の日NGは計算に影響しない。
-            ng_items = []
-            for d in range(1, num_days + 1):
-                val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
-                if val == "全NG":
-                    ng_items.append(str(d))
-                elif val != "OK":
-                    ng_items.append(f"{d}:{val}")
-            staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
+        # 保存値（指定したとおりの内容）を医師条件へ書き込む。
+        # 平日の全NGは計算上は宿NGと同じ、平日の日NGは計算に影響しない。
+        ng_items = []
+        for d in range(1, num_days + 1):
+            val = st.session_state.get(f"ng_{doc_name}_{year}_{month}_{d}", "OK")
+            if val == "全NG":
+                ng_items.append(str(d))
+            elif val != "OK":
+                ng_items.append(f"{d}:{val}")
+        staff_df.at[original_idx, NG_COLUMN] = ",".join(ng_items)
 
 
 st.divider()
@@ -2093,7 +2119,7 @@ if len(staff_df) > 0:
 
         st.divider()
         st.subheader("🗓️ 医師別の当直一覧")
-        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直はオレンジの枠で囲みます。")
+        st.caption("決まった当直は枠名、当直NGは×、翌日PM dutyで宿直を外す日は斜線で表示します。希望日が通った当直は★を付けて黒い太枠で囲みます。")
         matrix_days, matrix_rows = build_duty_matrix(df_result, staff_df, year, month, custom_holidays, next_month_special_holiday)
         missing_total = sum(len(info['shortage']) for info in matrix_days)
         if missing_total:
